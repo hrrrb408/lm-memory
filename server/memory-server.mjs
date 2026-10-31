@@ -164,10 +164,10 @@ server.registerTool("memory_recall", {
   const words = query.replace(/["'^*]/g, " ").trim().split(/\s+/).filter(Boolean);
   const kindParams = kind ? [kind] : [];
   let rows = [];
-  // 1) FTS trigram 短语（每个词 ≥3 字符才可用 trigram 索引）
+  // 1) 单词查询：FTS trigram 短语精确匹配（≥3 字符才可用 trigram 索引）
   try {
-    if (words.length && words.every((w) => w.length >= 3)) {
-      const match = words.map((w) => `"${w}"`).join(" OR ");
+    if (words.length === 1 && words[0].length >= 3) {
+      const match = `"${words[0]}"`;
       rows = db.prepare(
         `SELECT m.* FROM memories m JOIN memories_fts f ON f.rowid = m.id
          WHERE memories_fts MATCH ? AND m.status='active' ${kind ? "AND m.kind=?" : ""}
@@ -175,26 +175,56 @@ server.registerTool("memory_recall", {
       ).all(...(kind ? [match, kind, limit] : [match, limit]));
     }
   } catch (e) { console.error("[memory] fts error:", e.message); }
-  // 2) LIKE 逐词 AND（短词 / FTS 未命中时）
-  if (!rows.length) {
-    const terms = words.length ? words : [query.trim()];
-    const where = terms.map(() => "(content LIKE ? OR tags LIKE ?)").join(" AND ");
-    const params = terms.flatMap((w) => [`%${w}%`, `%${w}%`]);
-    rows = db.prepare(
-      `SELECT * FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""} AND (${where})
-       ORDER BY updated_at DESC LIMIT ?`
-    ).all(...kindParams, ...params, limit);
-  }
-  // 3) 单个纯中文长词 → 2 字符滑窗 OR（整句自然语言查询的兜底；ASCII 混合词不走此路，避免噪音）
+  // 打分检索公共件：IDF 式停用词过滤 + 命中数排序 + 阈值
+  const activeCount = db.prepare("SELECT count(*) n FROM memories WHERE status='active'").get().n;
+  const QWORDS = new Set(["什么", "怎么", "哪个", "哪些", "多少", "如何", "为什么", "吗", "呢", "是不是"]);
+  const dropStop = (terms) => {
+    const useful = terms.filter((t) => !QWORDS.has(t) && t.length >= 2);
+    if (!useful.length) return terms;
+    const df = useful.map((t) => db.prepare("SELECT count(*) n FROM memories WHERE status='active' AND content LIKE ?").get(`%${t}%`).n);
+    const kept = useful.filter((_, i) => df[i] < Math.max(3, Math.floor(activeCount / 2)));
+    return kept.length ? kept : useful; // 全被过滤则退回（宁漏勿假死的兜底）
+  };
+  const scoredOr = (terms) => {
+    const kept = dropStop(terms);
+    if (!kept.length) return [];
+    const dfOf = (t) => db.prepare("SELECT count(*) n FROM memories WHERE status='active' AND content LIKE ?").get(`%${t}%`).n;
+    const rareFlags = kept.map((t) => dfOf(t) <= 3 && t.length >= 3); // 稀有完整词（≥3字符，df≤3）单独命中即有说服力；二元组不豁免
+    const cases = kept.map(() => "(CASE WHEN content LIKE ? THEN 1 ELSE 0 END)").join(" + ");
+    const rareCases = kept.map((t, i) => rareFlags[i] ? "(CASE WHEN content LIKE ? THEN 1 ELSE 0 END)" : "0").join(" + ");
+    const scored = db.prepare(
+      `SELECT *, (${cases}) AS gscore, (${rareCases}) AS rscore FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""}
+       ORDER BY gscore DESC, rscore DESC, updated_at DESC LIMIT ?`
+    ).all(...kept.map((t) => `%${t}%`), ...kept.filter((_, i) => rareFlags[i]).map((t) => `%${t}%`), ...kindParams, limit);
+    const minScore = Math.max(2, Math.ceil(kept.length * 0.2));
+    return scored.filter((r) => r.gscore >= minScore || r.rscore >= 1);
+  };
+  // 2) 词元展开：ASCII 词保留；≥3 字的中文连续段展开为二元组（轻量中文分词替代）
+  const expandTerms = (ws) => {
+    const out = [];
+    for (const w of ws) {
+      const cjkRuns = w.match(/[\u4e00-\u9fff]{3,}/g) ?? [];
+      const asciiBits = w.split(/[\u4e00-\u9fff]+/).filter((s) => s.length >= 2);
+      out.push(...asciiBits);
+      for (const run of cjkRuns) for (let i = 0; i + 2 <= run.length && out.length < 14; i++) out.push(run.slice(i, i + 2));
+      if (cjkRuns.length === 0 && asciiBits.length === 0 && w.length >= 2) out.push(w);
+    }
+    return [...new Set(out)];
+  };
+  // 3) 多词查询：打分检索（部分词命中可救回；≥2 命中阈值防洪水）
+  if (!rows.length && words.length >= 2) rows = scoredOr(expandTerms(words));
+  // 4) 单个纯中文长词：二元组滑窗打分
   if (!rows.length && words.length === 1 && /^[\u4e00-\u9fff]{5,}$/.test(words[0])) {
     const grams = [];
-    for (let i = 0; i + 2 <= words[0].length && grams.length < 8; i++) grams.push(words[0].slice(i, i + 2));
-    const where = grams.map(() => "(content LIKE ? OR tags LIKE ?)").join(" OR ");
-    const params = grams.flatMap((g) => [`%${g}%`, `%${g}%`]);
+    for (let i = 0; i + 2 <= words[0].length && grams.length < 10; i++) grams.push(words[0].slice(i, i + 2));
+    rows = scoredOr(grams);
+  }
+  // 5) 单个短词兜底：LIKE
+  if (!rows.length && words.length === 1) {
     rows = db.prepare(
-      `SELECT * FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""} AND (${where})
+      `SELECT * FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""} AND (content LIKE ? OR tags LIKE ?)
        ORDER BY updated_at DESC LIMIT ?`
-    ).all(...kindParams, ...params, limit);
+    ).all(...kindParams, `%${words[0]}%`, `%${words[0]}%`, limit);
   }
   audit("recall", { query: query.slice(0, 60), hits: rows.length });
   if (!rows.length) return ok("[]（无相关记忆。不确定就不编造。）");

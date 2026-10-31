@@ -1,0 +1,453 @@
+{
+  "cats": {
+    "A-关键词": {
+      "n": 8,
+      "r1": 8,
+      "r5": 8,
+      "mrr": 8
+    },
+    "B-语义改写": {
+      "n": 8,
+      "r1": 2,
+      "r5": 4,
+      "mrr": 3
+    },
+    "C-时间/状态": {
+      "n": 4,
+      "r1": 1,
+      "r5": 3,
+      "mrr": 1.8333333333333333
+    },
+    "F-干扰区分": {
+      "n": 6,
+      "r1": 4,
+      "r5": 4,
+      "mrr": 4
+    }
+  },
+  "total": 26,
+  "mrr": 0.6474358974358976,
+  "fpRate": 0,
+  "dUpdateNew": true,
+  "dOldAbsent": true,
+  "rows": [
+    {
+      "cat": "A-关键词",
+      "q": "微信",
+      "gold": [
+        "m01"
+      ],
+      "hitDs": [
+        "m01"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "A-关键词",
+      "q": "MacBook",
+      "gold": [
+        "m04"
+      ],
+      "hitDs": [
+        "m04"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "A-关键词",
+      "q": "中南大学 Origin",
+      "gold": [
+        "m23",
+        "m05"
+      ],
+      "hitDs": [
+        "m23",
+        "m16",
+        "m05"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "A-关键词",
+      "q": "insert 语法",
+      "gold": [
+        "m11"
+      ],
+      "hitDs": [
+        "m11"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "A-关键词",
+      "q": "GitHub 仓库",
+      "gold": [
+        "m09",
+        "m10"
+      ],
+      "hitDs": [
+        "m09",
+        "m10"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "A-关键词",
+      "q": "鲸鱼挂件",
+      "gold": [
+        "m22"
+      ],
+      "hitDs": [
+        "m22"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "A-关键词",
+      "q": "npm 缓存",
+      "gold": [
+        "m13"
+      ],
+      "hitDs": [
+        "m13",
+        "m10"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "A-关键词",
+      "q": "过度工程",
+      "gold": [
+        "m02"
+      ],
+      "hitDs": [
+        "m02"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "他用什么芯片的电脑",
+      "gold": [
+        "m04"
+      ],
+      "hitDs": [
+        "m04"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "怎么在 mac 上跑 windows 专属软件",
+      "gold": [
+        "m16",
+        "m12"
+      ],
+      "hitDs": [
+        "m24",
+        "m16",
+        "m04"
+      ],
+      "in1": false,
+      "in5": true,
+      "rr": 0.5
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "账号登录不上模型报错怎么办",
+      "gold": [
+        "m08"
+      ],
+      "hitDs": [
+        "m08"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "数据库索引坏了怎么修复",
+      "gold": [
+        "m15"
+      ],
+      "hitDs": [],
+      "in1": false,
+      "in5": false,
+      "rr": 0
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "用户给 AI 起了什么外号",
+      "gold": [
+        "m01"
+      ],
+      "hitDs": [],
+      "in1": false,
+      "in5": false,
+      "rr": 0
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "网页打不开显示无权限",
+      "gold": [
+        "m14"
+      ],
+      "hitDs": [
+        "m22"
+      ],
+      "in1": false,
+      "in5": false,
+      "rr": 0
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "代码开源了吗放哪了",
+      "gold": [
+        "m09"
+      ],
+      "hitDs": [],
+      "in1": false,
+      "in5": false,
+      "rr": 0
+    },
+    {
+      "cat": "B-语义改写",
+      "q": "他喜欢什么样的设计风格",
+      "gold": [
+        "m03",
+        "m26"
+      ],
+      "hitDs": [
+        "m06",
+        "m26",
+        "m03"
+      ],
+      "in1": false,
+      "in5": true,
+      "rr": 0.5
+    },
+    {
+      "cat": "C-时间/状态",
+      "q": "Codex 现在能用吗",
+      "gold": [
+        "m08"
+      ],
+      "hitDs": [
+        "m20",
+        "m07",
+        "m08"
+      ],
+      "in1": false,
+      "in5": true,
+      "rr": 0.3333333333333333
+    },
+    {
+      "cat": "C-时间/状态",
+      "q": "最近在做什么项目",
+      "gold": [
+        "m09",
+        "m18"
+      ],
+      "hitDs": [],
+      "in1": false,
+      "in5": false,
+      "rr": 0
+    },
+    {
+      "cat": "C-时间/状态",
+      "q": "npm 包发了吗",
+      "gold": [
+        "m10"
+      ],
+      "hitDs": [
+        "m13",
+        "m10"
+      ],
+      "in1": false,
+      "in5": true,
+      "rr": 0.5
+    },
+    {
+      "cat": "C-时间/状态",
+      "q": "今天聊了什么",
+      "gold": [
+        "m18",
+        "m30"
+      ],
+      "hitDs": [
+        "m30"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "F-干扰区分",
+      "q": "用户本人是哪个学校的",
+      "gold": [
+        "m05"
+      ],
+      "hitDs": [
+        "m05"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1,
+      "note": "正确行为：返回含否定信息的记忆（帮朋友查，本人不是）"
+    },
+    {
+      "cat": "F-干扰区分",
+      "q": "谁的学校买了 Origin",
+      "gold": [
+        "m23"
+      ],
+      "hitDs": [
+        "m23",
+        "m16",
+        "m05"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "F-干扰区分",
+      "q": "用户的电脑内存多大",
+      "gold": [
+        "m04"
+      ],
+      "hitDs": [
+        "m04"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1
+    },
+    {
+      "cat": "F-干扰区分",
+      "q": "DSH 的记忆系统是什么架构",
+      "gold": [
+        "m27",
+        "m09"
+      ],
+      "hitDs": [
+        "m30",
+        "m18",
+        "m04"
+      ],
+      "in1": false,
+      "in5": false,
+      "rr": 0
+    },
+    {
+      "cat": "F-干扰区分",
+      "q": "哪条经验是关于 shell 命令的",
+      "gold": [
+        "m24"
+      ],
+      "hitDs": [],
+      "in1": false,
+      "in5": false,
+      "rr": 0
+    },
+    {
+      "cat": "F-干扰区分",
+      "q": "用户手机型号",
+      "gold": [
+        "m28"
+      ],
+      "hitDs": [
+        "m28"
+      ],
+      "in1": true,
+      "in5": true,
+      "rr": 1,
+      "note": "正确行为：返回\"型号未知\"的记忆"
+    },
+    {
+      "cat": "E-空结果",
+      "q": "用户最喜欢的披萨口味",
+      "gold": [],
+      "hitDs": [],
+      "in1": false,
+      "in5": true,
+      "rr": 0,
+      "abstain": true,
+      "pass": true
+    },
+    {
+      "cat": "E-空结果",
+      "q": "用户的生日",
+      "gold": [],
+      "hitDs": [],
+      "in1": false,
+      "in5": true,
+      "rr": 0,
+      "abstain": true,
+      "pass": true
+    },
+    {
+      "cat": "E-空结果",
+      "q": "怎么配置 Kubernetes 集群",
+      "gold": [],
+      "hitDs": [],
+      "in1": false,
+      "in5": true,
+      "rr": 0,
+      "abstain": true,
+      "pass": true
+    },
+    {
+      "cat": "E-空结果",
+      "q": "用户的家庭住址",
+      "gold": [],
+      "hitDs": [],
+      "in1": false,
+      "in5": true,
+      "rr": 0,
+      "abstain": true,
+      "pass": true
+    },
+    {
+      "cat": "E-空结果",
+      "q": "Python 虚拟环境创建方法",
+      "gold": [],
+      "hitDs": [],
+      "in1": false,
+      "in5": true,
+      "rr": 0,
+      "abstain": true,
+      "pass": true
+    },
+    {
+      "cat": "E-空结果",
+      "q": "用户昨晚吃了什么",
+      "gold": [],
+      "hitDs": [],
+      "in1": false,
+      "in5": true,
+      "rr": 0,
+      "abstain": true,
+      "pass": true
+    }
+  ]
+}
