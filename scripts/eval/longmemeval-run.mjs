@@ -34,14 +34,14 @@ for (let i = 0; i < items.length; i++) {
     // 入库：每个 haystack session 切成 ≤1800 字符块（同 session 同 tag，金标按 tag 命中）
     const dates = item.haystack_dates ?? [];
     const ids = item.haystack_session_ids ?? [];
-    const CHUNK = 1800;
+    const CHUNK = 1800, OVERLAP = 300;
     let memCount = 0;
     for (let s = 0; s < (item.haystack_sessions?.length ?? 0); s++) {
       const turns = item.haystack_sessions[s] ?? [];
       const text = turns.map((t) => `${t.role}: ${t.content}`).join("\n");
       if (!text.trim()) continue;
       const tag = String(ids[s] ?? `s${s}`);
-      for (let c = 0; c < text.length; c += CHUNK) {
+      for (let c = 0; c < text.length; c += CHUNK - OVERLAP) {
         const piece = text.slice(c, c + CHUNK);
         if (piece.trim().length < 20) continue;
         const out = await call("memory_remember", {

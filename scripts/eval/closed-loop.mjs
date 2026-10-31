@@ -49,11 +49,11 @@ for (let i = 0; i < items.length; i++) {
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [SERVER], env: { ...process.env, LM_MEMORY_DIR: dir } }));
     const call = (n, a) => client.callTool({ name: n, arguments: a }).then((r) => r.content[0].text);
     const dates = item.haystack_dates ?? [], ids = item.haystack_session_ids ?? [];
-    const CHUNK = 1800;
+    const CHUNK = 1800, OVERLAP = 300;
     for (let s = 0; s < (item.haystack_sessions?.length ?? 0); s++) {
       const text = (item.haystack_sessions[s] ?? []).map((t) => `${t.role}: ${t.content}`).join("\n");
       const tag = String(ids[s] ?? `s${s}`);
-      for (let c = 0; c < text.length; c += CHUNK) {
+      for (let c = 0; c < text.length; c += CHUNK - OVERLAP) {
         const piece = text.slice(c, c + CHUNK);
         if (piece.trim().length >= 20) await call("memory_remember", { content: `会话 ${dates[s] ?? ""}｜${piece}`, kind: "episode", tags: `lmeval,${tag}` });
       }
@@ -67,11 +67,11 @@ for (let i = 0; i < items.length; i++) {
 
   const Q = `问题：${item.question}\n（无法确定时只回答 UNKNOWN）`;
   const ctx = evidence.length
-    ? `以下是检索到的记忆片段（可能无关，自行取舍）：\n\n${evidence.map((e, k) => `[片段${k + 1}] ${e.content.slice(0, 900)}`).join("\n\n")}\n\n${Q}`
+    ? `以下是检索到的记忆片段（可能无关，自行取舍）：\n\n${evidence.map((e, k) => `[片段${k + 1}] ${e.content.slice(0, 1800)}`).join("\n\n")}\n\n${Q}`
     : `（检索无结果）\n\n${Q}`;
   const [ansA, ansB] = await Promise.all([
     llm(`用一句英文或UNKNOWN直接回答，不要解释。\n\n${Q}`),
-    llm(`用一句英文或UNKNOWN直接回答，不要解释。\n\n${ctx}`),
+    llm(`先从片段中找出包含答案的句子（内部引用，不输出），再用一句英文或UNKNOWN直接回答，不要解释。\n\n${ctx}`),
   ]);
   const judgeRaw = await llm(`金标答案：${item.answer}\n回答A（无记忆）：${ansA || "(空)"}\n回答B（带记忆检索）：${ansB || "(空)"}\n\n分别判定 A 和 B 与金标是否一致。只输出 JSON：{"A":"correct|partial|wrong","B":"correct|partial|wrong"}`, 120);
   const pick = (m) => (m && m[1] ? m[1] : "wrong");

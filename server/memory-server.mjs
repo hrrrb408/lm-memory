@@ -168,13 +168,34 @@ server.registerTool("memory_recall", {
   try {
     if (words.length === 1 && words[0].length >= 3) {
       const match = `"${words[0]}"`;
-      rows = db.prepare(
+      rows = diversify(db.prepare(
         `SELECT m.* FROM memories m JOIN memories_fts f ON f.rowid = m.id
          WHERE memories_fts MATCH ? AND m.status='active' ${kind ? "AND m.kind=?" : ""}
          ORDER BY bm25(memories_fts) LIMIT ?`
-      ).all(...(kind ? [match, kind, limit] : [match, limit]));
+      ).all(...(kind ? [match, kind, limit * 3] : [match, limit * 3])), limit);
     }
   } catch (e) { console.error("[memory] fts error:", e.message); }
+  // 多样性排序：同 tags 组（如同会话的分块）先各取最优，再回填剩余名额
+  const diversify = (rs, lim) => {
+    if (rs.length <= lim) return rs;
+    const byGroup = new Map();
+    for (const r of rs) {
+      const key = r.tags || `__id_${r.id}`;
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key).push(r);
+    }
+    const groups = [...byGroup.values()];
+    const out = [];
+    for (let round = 0; out.length < lim; round++) {
+      let added = false;
+      for (const g of groups) {
+        if (out.length >= lim) break;
+        if (g[round]) { out.push(g[round]); added = true; }
+      }
+      if (!added) break;
+    }
+    return out;
+  };
   // 打分检索公共件：IDF 式停用词过滤 + 命中数排序 + 阈值
   const activeCount = db.prepare("SELECT count(*) n FROM memories WHERE status='active'").get().n;
   const QWORDS = new Set(["什么", "怎么", "哪个", "哪些", "多少", "如何", "为什么", "吗", "呢", "是不是"]);
@@ -195,9 +216,9 @@ server.registerTool("memory_recall", {
     const scored = db.prepare(
       `SELECT *, (${cases}) AS gscore, (${rareCases}) AS rscore FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""}
        ORDER BY gscore DESC, rscore DESC, updated_at DESC LIMIT ?`
-    ).all(...kept.map((t) => `%${t}%`), ...kept.filter((_, i) => rareFlags[i]).map((t) => `%${t}%`), ...kindParams, limit);
+    ).all(...kept.map((t) => `%${t}%`), ...kept.filter((_, i) => rareFlags[i]).map((t) => `%${t}%`), ...kindParams, limit * 3);
     const minScore = Math.max(2, Math.ceil(kept.length * 0.2));
-    return scored.filter((r) => r.gscore >= minScore || r.rscore >= 1);
+    return diversify(scored.filter((r) => r.gscore >= minScore || r.rscore >= 1), limit);
   };
   // 2) 词元展开：ASCII 词保留；≥3 字的中文连续段展开为二元组（轻量中文分词替代）
   const expandTerms = (ws) => {

@@ -1,16 +1,16 @@
 {
   "n": 30,
   "accA": 0,
-  "accB": 0.26666666666666666,
+  "accB": 0.36666666666666664,
   "evHit": 0.8666666666666667,
-  "evAndB": 0.3076923076923077,
+  "evAndB": 0.38461538461538464,
   "results": [
     {
       "q": "What degree did I graduate with?",
       "type": "single-session-user",
       "gold": "Business Administration",
       "ansA": "UNKNOWN",
-      "ansB": "Business Administration",
+      "ansB": "A degree in Business Administration.",
       "A": "wrong",
       "B": "correct",
       "evidenceHit": true
@@ -20,19 +20,19 @@
       "type": "single-session-user",
       "gold": "45 minutes each way",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "45 minutes each way (90 minutes total daily).",
       "A": "wrong",
-      "B": "wrong",
-      "evidenceHit": false
+      "B": "correct",
+      "evidenceHit": true
     },
     {
       "q": "Where did I redeem a $5 coupon on coffee creamer?",
       "type": "single-session-user",
       "gold": "Target",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "You redeemed it at Target, using a coupon you found in your email inbox.",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -40,9 +40,9 @@
       "type": "single-session-user",
       "gold": "The Glass Menagerie",
       "ansA": "UNKNOWN",
-      "ansB": "You attended *The Glass Menagerie* at the local community theater.",
+      "ansB": "The Glass Menagerie",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     },
     {
@@ -50,7 +50,7 @@
       "type": "single-session-user",
       "gold": "Summer Vibes",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "Summer Vibes",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -60,7 +60,7 @@
       "type": "single-session-user",
       "gold": "Johnson",
       "ansA": "UNKNOWN",
-      "ansB": "Johnson",
+      "ansB": "UNKNOWN",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -70,7 +70,7 @@
       "type": "single-session-user",
       "gold": "Serenity Yoga",
       "ansA": "UNKNOWN",
-      "ansB": "At home, using the Down Dog app.",
+      "ansB": "You take yoga classes at a studio (with a connection to Serenity Yoga), suppleme",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -90,7 +90,7 @@
       "type": "single-session-user",
       "gold": "February 14th",
       "ansA": "UNKNOWN",
-      "ansB": "You volunteered at the \"Love is in the Air\" fundraising dinner back in February,",
+      "ansB": "You volunteered at the \"Love is in the Air\" fundraising dinner on Valentine's Da",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -140,9 +140,9 @@
       "type": "single-session-user",
       "gold": "University of Melbourne in Australia",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "University of Melbourne",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -150,7 +150,7 @@
       "type": "single-session-user",
       "gold": "10%",
       "ansA": "UNKNOWN",
-      "ansB": "You got a 10% discount on your first purchase from the new clothing brand.",
+      "ansB": "A 10% discount on your first purchase.",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -160,7 +160,7 @@
       "type": "single-session-user",
       "gold": "4 hours",
       "ansA": "UNKNOWN",
-      "ansB": "It took you 4 hours to assemble the IKEA bookshelf.",
+      "ansB": "UNKNOWN",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -170,7 +170,7 @@
       "type": "single-session-user",
       "gold": "a yellow dress",
       "ansA": "UNKNOWN",
-      "ansB": "You bought your sister a yellow dress and a matching pair of earrings.",
+      "ansB": "You bought her a yellow dress and a pair of earrings to match it.",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -190,9 +190,9 @@
       "type": "single-session-user",
       "gold": "7",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "You packed 7 shirts for your trip to Costa Rica.",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -200,7 +200,7 @@
       "type": "single-session-user",
       "gold": "A staunch atheist",
       "ansA": "UNKNOWN",
-      "ansB": "I used to be a staunch atheist.",
+      "ansB": "You used to be a staunch atheist.",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -212,7 +212,7 @@
       "ansA": "UNKNOWN",
       "ansB": "Nike",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     },
     {
@@ -220,7 +220,7 @@
       "type": "single-session-user",
       "gold": "Data Science",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "You completed a certification in Data Science.",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -243,16 +243,16 @@
       "ansB": "UNKNOWN",
       "A": "wrong",
       "B": "wrong",
-      "evidenceHit": true
+      "evidenceHit": false
     },
     {
       "q": "How many largemouth bass did I catch on my fishing trip to L",
       "type": "single-session-user",
       "gold": "12",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "12",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -270,9 +270,9 @@
       "type": "single-session-user",
       "gold": "Luna",
       "ansA": "UNKNOWN",
-      "ansB": "UNKNOWN",
+      "ansB": "Luna",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": false
     },
     {
@@ -300,9 +300,9 @@
       "type": "single-session-user",
       "gold": "16GB",
       "ansA": "UNKNOWN",
-      "ansB": "16GB.",
+      "ansB": "UNKNOWN",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     }
   ]
