@@ -1,0 +1,309 @@
+{
+  "n": 30,
+  "accA": 0,
+  "accB": 0.26666666666666666,
+  "evHit": 0.8666666666666667,
+  "evAndB": 0.3076923076923077,
+  "results": [
+    {
+      "q": "What degree did I graduate with?",
+      "type": "single-session-user",
+      "gold": "Business Administration",
+      "ansA": "UNKNOWN",
+      "ansB": "Business Administration",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    },
+    {
+      "q": "How long is my daily commute to work?",
+      "type": "single-session-user",
+      "gold": "45 minutes each way",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": false
+    },
+    {
+      "q": "Where did I redeem a $5 coupon on coffee creamer?",
+      "type": "single-session-user",
+      "gold": "Target",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What play did I attend at the local community theater?",
+      "type": "single-session-user",
+      "gold": "The Glass Menagerie",
+      "ansA": "UNKNOWN",
+      "ansB": "You attended *The Glass Menagerie* at the local community theater.",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    },
+    {
+      "q": "What is the name of the playlist I created on Spotify?",
+      "type": "single-session-user",
+      "gold": "Summer Vibes",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What was my last name before I changed it?",
+      "type": "single-session-user",
+      "gold": "Johnson",
+      "ansA": "UNKNOWN",
+      "ansB": "Johnson",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "Where do I take yoga classes?",
+      "type": "single-session-user",
+      "gold": "Serenity Yoga",
+      "ansA": "UNKNOWN",
+      "ansB": "At home, using the Down Dog app.",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What color did I repaint my bedroom walls?",
+      "type": "single-session-user",
+      "gold": "a lighter shade of gray",
+      "ansA": "UNKNOWN",
+      "ansB": "A lighter shade of gray.",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    },
+    {
+      "q": "When did I volunteer at the local animal shelter's fundraisi",
+      "type": "single-session-user",
+      "gold": "February 14th",
+      "ansA": "UNKNOWN",
+      "ansB": "You volunteered at the \"Love is in the Air\" fundraising dinner back in February,",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "Where did I buy my new tennis racket from?",
+      "type": "single-session-user",
+      "gold": "the sports store downtown",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What was my previous occupation?",
+      "type": "single-session-user",
+      "gold": "Marketing specialist at a small startup",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": false
+    },
+    {
+      "q": "How much did I spend on a designer handbag?",
+      "type": "single-session-user",
+      "gold": "$800",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "How many playlists do I have on Spotify?",
+      "type": "single-session-user",
+      "gold": "20",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "Where did I attend for my study abroad program?",
+      "type": "single-session-user",
+      "gold": "University of Melbourne in Australia",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What was the discount I got on my first purchase from the ne",
+      "type": "single-session-user",
+      "gold": "10%",
+      "ansA": "UNKNOWN",
+      "ansB": "You got a 10% discount on your first purchase from the new clothing brand.",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "How long did it take me to assemble the IKEA bookshelf?",
+      "type": "single-session-user",
+      "gold": "4 hours",
+      "ansA": "UNKNOWN",
+      "ansB": "It took you 4 hours to assemble the IKEA bookshelf.",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What did I buy for my sister's birthday gift?",
+      "type": "single-session-user",
+      "gold": "a yellow dress",
+      "ansA": "UNKNOWN",
+      "ansB": "You bought your sister a yellow dress and a matching pair of earrings.",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What speed is my new internet plan?",
+      "type": "single-session-user",
+      "gold": "500 Mbps",
+      "ansA": "UNKNOWN",
+      "ansB": "500 Mbps",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    },
+    {
+      "q": "How many shirts did I pack for my 5-day trip to Costa Rica?",
+      "type": "single-session-user",
+      "gold": "7",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What was my previous stance on spirituality?",
+      "type": "single-session-user",
+      "gold": "A staunch atheist",
+      "ansA": "UNKNOWN",
+      "ansB": "I used to be a staunch atheist.",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What brand are my favorite running shoes?",
+      "type": "single-session-user",
+      "gold": "Nike",
+      "ansA": "UNKNOWN",
+      "ansB": "Nike",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    },
+    {
+      "q": "What certification did I complete last month?",
+      "type": "single-session-user",
+      "gold": "Data Science",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "How many bikes do I own?",
+      "type": "single-session-user",
+      "gold": "three",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": false
+    },
+    {
+      "q": "What breed is my dog?",
+      "type": "single-session-user",
+      "gold": "Golden Retriever",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "How many largemouth bass did I catch on my fishing trip to L",
+      "type": "single-session-user",
+      "gold": "12",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "How many amateur comedians did I watch perform at the open m",
+      "type": "single-session-user",
+      "gold": "10",
+      "ansA": "UNKNOWN",
+      "ansB": "10",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    },
+    {
+      "q": "What is the name of my cat?",
+      "type": "single-session-user",
+      "gold": "Luna",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": false
+    },
+    {
+      "q": "How old was I when my grandma gave me the silver necklace?",
+      "type": "single-session-user",
+      "gold": "18",
+      "ansA": "UNKNOWN",
+      "ansB": "UNKNOWN",
+      "A": "wrong",
+      "B": "wrong",
+      "evidenceHit": true
+    },
+    {
+      "q": "What is my preferred gin-to-vermouth ratio for a classic gin",
+      "type": "single-session-user",
+      "gold": "3:1",
+      "ansA": "UNKNOWN",
+      "ansB": "3:1",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    },
+    {
+      "q": "How much RAM did I upgrade my laptop to?",
+      "type": "single-session-user",
+      "gold": "16GB",
+      "ansA": "UNKNOWN",
+      "ansB": "16GB.",
+      "A": "wrong",
+      "B": "correct",
+      "evidenceHit": true
+    }
+  ]
+}
