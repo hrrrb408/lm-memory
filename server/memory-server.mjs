@@ -113,7 +113,7 @@ function ingestPending() {
 const SECRET_PATTERNS = [
   /sk-[A-Za-z0-9]{16,}/i,
   /(api[_-]?key|passwd|password|secret|bearer)\s*[:=]\s*\S{6,}/i,
-  /[A-Za-z0-9+/_=-]{40,}/, // long credential-shaped runs
+  /(ghp|gho|xox[baprs]|AKIA)[A-Za-z0-9]{16,}/, // 已知平台 token 前缀
 ];
 function checkSecret(content) {
   for (const p of SECRET_PATTERNS) if (p.test(content)) return p.source;
