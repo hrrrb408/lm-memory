@@ -1,0 +1,9 @@
+{
+  "name": "dsh-lm-capture",
+  "version": "0.1.0",
+  "description": "Living Memory 自动采集：会话结束时把真实用户输入提炼为一条 episode 写入待处理队列",
+  "keywords": ["dsh-plugin", "dsh", "memory"],
+  "main": "lib/index.js",
+  "type": "module",
+  "license": "MIT"
+}
