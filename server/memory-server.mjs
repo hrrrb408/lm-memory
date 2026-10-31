@@ -8,7 +8,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { DatabaseSync } from "node:sqlite";
-import { pipeline as hfPipeline, env as hfEnv } from "@huggingface/transformers";
+// 语义层依赖动态加载：缺失/损坏时降级为纯词法，绝不阻断服务器（fail-open）
+let hfPipeline = null;
+let hfEnv = null;
+try { ({ pipeline: hfPipeline, env: hfEnv } = await import("@huggingface/transformers")); } catch { console.error("[memory] transformers 不可用，语义层降级为纯词法"); }
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -92,12 +95,12 @@ try {
     db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('emb_model', ?)").run(EMB_MODEL);
   } else db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('emb_model', ?)").run(EMB_MODEL);
 } catch (e) { console.error("[memory] emb meta init:", e.message); }
-hfEnv.cacheDir = process.env.LM_EMBED_CACHE || path.join(MEM_DIR, "models");
-hfEnv.allowRemoteModels = true;
+if (hfEnv) hfEnv.cacheDir = process.env.LM_EMBED_CACHE || path.join(MEM_DIR, "models");
+if (hfEnv) hfEnv.allowRemoteModels = true;
 async function getEmbedder() {
   if (!EMB_ENABLED) return null;
   if (embedder) return embedder;
-  if (!embedderLoading) embedderLoading = hfPipeline("feature-extraction", EMB_MODEL, { dtype: "q8" })
+  if (!embedderLoading) embedderLoading = hfPipeline?.("feature-extraction", EMB_MODEL, { dtype: "q8" })
     .then((p) => { embedder = p; audit("embed_model_loaded", { model: EMB_MODEL }); return p; })
     .catch((e) => { audit("embed_model_failed", { error: String(e).slice(0, 120) }); return null; })
     .finally(() => { embedderLoading = null; });
