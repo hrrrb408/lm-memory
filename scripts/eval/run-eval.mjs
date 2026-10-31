@@ -4,6 +4,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +18,7 @@ const client = new Client({ name: "lm-eval", version: "0.1" });
 await client.connect(new StdioClientTransport({
   command: process.execPath,
   args: [path.join(__dirname, "../../server/memory-server.mjs")],
-  env: { ...process.env, LM_MEMORY_DIR: MEM_DIR },
+  env: { ...process.env, LM_EMBED_CACHE: process.env.LM_EMBED_CACHE || (os.homedir() + "/.cache/lm-memory-embed"), LM_MEMORY_DIR: MEM_DIR },
 }));
 const call = (name, args) => client.callTool({ name, arguments: args }).then((r) => r.content[0].text);
 

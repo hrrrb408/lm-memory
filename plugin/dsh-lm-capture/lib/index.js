@@ -4,6 +4,7 @@
 // 追加到 ~/.dsh/memory/pending-episodes.jsonl；由 lm-memory MCP server 在启动/召回时入库。
 // 纪律：任何异常都不得抛出宿主进程；只写 stderr；幂等（同一 session 只采一次）。
 import fs from "node:fs";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -38,6 +39,40 @@ function extractUserTexts(session) {
   return texts;
 }
 
+function resolveNode() {
+  const candidates = [
+    process.env.DSH_NODE,
+    "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/bin/node",
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+  ].filter(Boolean);
+  if (process.execPath && /\/node(\.exe)?$/.test(process.execPath)) return process.execPath;
+  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch {} }
+  return "node";
+}
+function dispatchExtraction(session, texts, config) {
+  try {
+    if (config?.extract === false || texts.length < 2) return;
+    const jobsDir = path.join(MEM_DIR, "extraction-jobs");
+    fs.mkdirSync(jobsDir, { recursive: true });
+    const jobFile = path.join(jobsDir, `${session.id}.json`);
+    fs.writeFileSync(jobFile, JSON.stringify({
+      sessionId: session.id,
+      date: new Date().toISOString().slice(0, 10),
+      cwd: session.header?.cwd ?? "",
+      texts,
+    }));
+        const child = spawn(resolveNode(), [path.join(path.dirname(new URL(import.meta.url).pathname), "extract-helper.mjs"), jobFile], {
+      detached: true, stdio: "ignore",
+      env: { ...process.env, LM_MEMORY_DIR: MEM_DIR },
+    });
+    child.unref();
+    log(`extraction dispatched: ${session.id} (${texts.length} msgs)`);
+  } catch (e) {
+    log(`extract dispatch error: ${e?.message ?? e}`);
+  }
+}
+
 function capture(session, config) {
   try {
     if (!session?.id || alreadyCaptured(session.id)) return;
@@ -60,6 +95,7 @@ function capture(session, config) {
     fs.appendFileSync(PENDING, JSON.stringify(rec) + "\n");
     markCaptured(session.id);
     log(`captured ${session.id} (${texts.length} user msgs)`);
+    dispatchExtraction(session, texts, config);
   } catch (e) {
     log(`capture error: ${e?.message ?? e}`);
   }

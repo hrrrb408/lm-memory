@@ -16,7 +16,9 @@ const SERVER = path.join(__dirname, "../../server/memory-server.mjs");
 
 console.log(`加载 LongMemEval_S（${DATA}）…`);
 const all = JSON.parse(fs.readFileSync(DATA, "utf8"));
-const items = all.slice(0, N);
+const typeFilter = process.env.LM_TYPES?.split(",").map((t) => t.trim()).filter(Boolean);
+const pool = typeFilter ? all.filter((x) => typeFilter.includes(x.question_type)) : all;
+const items = pool.slice(0, N);
 console.log(`取前 ${items.length} 题\n`);
 
 const results = [];
@@ -28,7 +30,7 @@ for (let i = 0; i < items.length; i++) {
   try {
     await client.connect(new StdioClientTransport({
       command: process.execPath, args: [SERVER],
-      env: { ...process.env, LM_MEMORY_DIR: dir },
+      env: { ...process.env, LM_EMBED_CACHE: process.env.LM_EMBED_CACHE || (os.homedir() + "/.cache/lm-memory-embed"), LM_MEMORY_DIR: dir },
     }));
     const call = (name, args) => client.callTool({ name, arguments: args }).then((r) => r.content[0].text);
     // 入库：每个 haystack session 切成 ≤1800 字符块（同 session 同 tag，金标按 tag 命中）

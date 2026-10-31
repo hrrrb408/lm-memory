@@ -46,7 +46,7 @@ for (let i = 0; i < items.length; i++) {
   let evidence = [], evidenceHit = false;
   try {
     const client = new Client({ name: "loop", version: "0.1" });
-    await client.connect(new StdioClientTransport({ command: process.execPath, args: [SERVER], env: { ...process.env, LM_MEMORY_DIR: dir } }));
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [SERVER], env: { ...process.env, LM_EMBED_CACHE: process.env.LM_EMBED_CACHE || (os.homedir() + "/.cache/lm-memory-embed"), LM_MEMORY_DIR: dir } }));
     const call = (n, a) => client.callTool({ name: n, arguments: a }).then((r) => r.content[0].text);
     const dates = item.haystack_dates ?? [], ids = item.haystack_session_ids ?? [];
     const CHUNK = 1800, OVERLAP = 300;
