@@ -102,7 +102,6 @@ function capture(session, config) {
   }
 }
 
-// DSH Web 界面入口：左下角「记忆」按钮（经 webserver/index-inject，与鲸鱼挂件同协议）
 export default function apply(ctx, config) {
   try {
     if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
