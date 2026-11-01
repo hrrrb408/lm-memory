@@ -23,6 +23,7 @@
     }
   },
   "exports": {
+    ".": "./lib/index.js",
     "./client": "./client.js"
   }
 }
