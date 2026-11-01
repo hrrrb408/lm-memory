@@ -236,7 +236,7 @@ load();
 </script></body></html>`;
 
 http.createServer(async (req, res) => {
-  const json = (d, code = 200) => { res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(d)); };
+  const json = (d, code = 200) => { res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" }); res.end(JSON.stringify(d)); };
   try {
     const u = new URL(req.url, "http://x");
     if (req.method === "GET" && u.pathname === "/") {

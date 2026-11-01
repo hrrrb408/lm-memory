@@ -101,9 +101,58 @@ function capture(session, config) {
   }
 }
 
+// DSH Web 界面入口：左下角「记忆」按钮（经 webserver/index-inject，与鲸鱼挂件同协议）
+const PANEL_ROW_TEXT = `
+(function(){
+  if (window.__lmPanelLoaded) return; window.__lmPanelLoaded = true;
+  var URL = 'http://127.0.0.1:7640';
+  var b = document.createElement('div');
+  b.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;align-items:center;gap:7px;'
+    + 'padding:8px 14px;border-radius:999px;cursor:pointer;font-size:13px;user-select:none;'
+    + 'background:rgba(28,25,23,.82);color:#fafaf9;backdrop-filter:blur(8px);'
+    + 'box-shadow:0 2px 10px rgba(0,0,0,.18);transition:transform .15s;font-family:-apple-system,"PingFang SC",sans-serif';
+  b.innerHTML = '<span style="font-size:15px">🧠</span><span>记忆</span>';
+  var n = document.createElement('span');
+  n.style.cssText = 'font-size:11.5px;opacity:.55';
+  b.appendChild(n);
+  b.onmouseenter = function(){ b.style.transform = 'translateY(-2px)'; };
+  b.onmouseleave = function(){ b.style.transform = ''; };
+  b.onclick = function(){ window.open(URL, '_blank'); };
+  var boot = function(){ if (document.body) { document.body.appendChild(b); fetch(URL + '/api/memories').then(function(r){return r.json();}).then(function(d){ n.textContent = d.total || ''; }).catch(function(){ n.textContent = '·'; }); } else setTimeout(boot, 300); };
+  boot();
+})();`.trim();
+
 export default function apply(ctx, config) {
   try {
     if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
+    // viewer 自启（config.viewer = 端口号；先探测端口，活着就不重复拉起）
+    if (config?.viewer) {
+      const port = Number(config.viewer);
+      fetch("http://127.0.0.1:" + port + "/api/memories").catch(() => {
+        try {
+          const viewerPath = path.join(path.dirname(new URL(import.meta.url).pathname), "../../../server/viewer.mjs");
+          if (fs.existsSync(viewerPath)) {
+            import("node:child_process").then(({ spawn: sp }) => {
+              const ch = sp(resolveNode(), [viewerPath, String(port)], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
+              ch.unref();
+              log("viewer spawned on " + port);
+            });
+          }
+        } catch (e) { log("viewer spawn error: " + (e?.message ?? e)); }
+      });
+    }
+    // Web 界面按钮注入（鲸鱼同款通道；行内含 __lmPanelLoaded 去重）
+    const rowDisposers = [];
+    if (typeof ctx.effect === "function") ctx.effect(() => () => { for (const d of rowDisposers) { try { d?.(); } catch {} } });
+    if (typeof ctx.on === "function") rowDisposers.push(ctx.on("webserver/index-inject", (table) => {
+      try {
+        if (!Array.isArray(table)) return;
+        for (const row of table) {
+          if (row?.kind === "script" && typeof row.text === "string" && row.text.indexOf("__lmPanelLoaded") >= 0) return;
+        }
+        table.push({ kind: "script", placement: "body", text: PANEL_ROW_TEXT });
+      } catch {}
+    }));
     const sessions = new Map();
     const byId = (sessionId) => {
       try { return ctx.sessions?.get?.(sessionId) ?? sessions.get(sessionId) ?? null; } catch { return sessions.get(sessionId) ?? null; }
