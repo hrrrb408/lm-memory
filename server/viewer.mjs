@@ -30,6 +30,41 @@ async function call(name, args) {
   } catch (e) { mcp = null; throw e; }
 }
 const ro = () => new DatabaseSync(DB_PATH, { readOnly: true });
+const rw = () => { const d = new DatabaseSync(DB_PATH); d.exec("PRAGMA busy_timeout=5000;"); return d; };
+const ZAI_KEY = () => fs.readFileSync(path.join(os.homedir(), ".dsh/.credentials.yaml"), "utf8").match(/ZAI_CODING_CN_API_KEY:\s*(\S+)/)?.[1];
+async function llm(prompt) {
+  const key = ZAI_KEY(); if (!key) return "";
+  for (let i = 0; i < 2; i++) {
+    try {
+      const r = await fetch("https://open.bigmodel.cn/api/coding/paas/v4/chat/completions", {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model: "glm-5.3-flash", messages: [{ role: "user", content: prompt }], max_tokens: 2500, temperature: 0.2 }),
+      });
+      const t = (await r.json()).choices?.[0]?.message?.content ?? "";
+      if (t) return t;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  return "";
+}
+async function genProfile() {
+  const all = await call("memory_list", { limit: 100 });
+  const body = all.map((m) => `[${m.kind}] ${m.content}`).join("\n").slice(0, 9000);
+  const out = await llm(`以下是一个记忆系统中关于某用户的全部记忆。请生成一份克制的用户画像：
+- 第一段：一句话概括这个人（客观，不吹捧，50字内）
+- 然后四个小节：**身份与环境** / **偏好与沟通风格** / **正在做的事** / **待办提醒**（有的话）
+- 只用记忆里有的信息，不推测；信息少就少写
+- 结尾列 6-12 个关键词 chips（用、分隔）
+
+记忆库：
+${body}`);
+  const rec = { summary: out.trim(), generated_at: new Date().toISOString() };
+  try { const d = rw(); d.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"); d.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('profile', ?)").run(JSON.stringify(rec)); } catch {}
+  return rec;
+}
+function cachedProfile() {
+  try { return JSON.parse(ro().prepare("SELECT value FROM meta WHERE key='profile'").get()?.value ?? "null"); } catch { return null; }
+}
 
 const KIND_META = {
   preference: ["偏好", "#c8402e"], fact: ["事实", "#2563eb"], procedure: ["经验", "#0f766e"],
@@ -67,11 +102,32 @@ main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
 .hist .old{text-decoration:line-through;opacity:.6}
 .empty{max-width:860px;margin:40px auto;text-align:center;color:var(--muted);font-size:14px}
 footer{max-width:860px;margin:28px auto 0;color:var(--muted);font-size:12px;text-align:center}
+nav{max-width:860px;margin:-14px auto 16px;display:flex;gap:2px;font-size:13.5px}
+nav a{padding:6px 14px;border-radius:8px;cursor:pointer;color:var(--muted)}
+nav a.on{background:var(--ink);color:#fff}
+#profile{max-width:860px;margin:0 auto;display:none;flex-direction:column;gap:14px}
+.pcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+.pcard h3{font-family:"Songti SC",Georgia,serif;font-size:16px;font-weight:600;margin-bottom:10px;color:var(--ink)}
+.psummary{white-space:pre-wrap;font-size:14.5px;line-height:1.8}
+.psummary b{font-family:"Songti SC",Georgia,serif}
+.pchips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pchips span{border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-size:12.5px;color:var(--muted)}
+.plist{display:flex;flex-direction:column;gap:8px}
+.prow{display:flex;gap:10px;font-size:14px;align-items:baseline}
+.prow .dot{width:6px;height:6px;border-radius:50%;flex:none;position:relative;top:-2px}
+.prow .when{color:var(--muted);font-size:12px;flex:none}
+.genbar{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.genbar button{background:var(--ink);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
+.genbar .meta{font-size:12px;color:var(--muted)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:680px){.two{grid-template-columns:1fr}}
 button{font:inherit}
 </style></head><body>
 <header><h1>记忆库</h1><div class="sub" id="sub"></div><div class="stats" id="stats"></div></header>
-<div class="bar"><input id="q" type="search" placeholder="搜索记忆（走完整检索管线：词法 + 中文语义）…"></div>
+<nav><a id="tabList" class="on" onclick="showView('list')">记忆库</a><a id="tabProfile" onclick="showView('profile')">画像</a></nav>
+<div class="bar" id="searchbar"><input id="q" type="search" placeholder="搜索记忆（走完整检索管线：词法 + 中文语义）…"></div>
 <main id="list"></main>
+<div id="profile"></div>
 <div class="empty" id="empty" style="display:none">没有匹配的记忆</div>
 <footer>lm-memory viewer · 数据在 ${MEM_DIR} · 操作走 MCP 同一套业务逻辑</footer>
 <script>
@@ -133,6 +189,48 @@ window.hist = async (id) => {
     h.map((v) => \`<div class="hist \${v.status === "superseded" ? "old" : ""}">v\${v.version} · \${v.status} · \${v.updated_at.slice(0, 10)}<br>\${esc(v.content.slice(0, 120))}</div>\`).join("");
 };
 $("#stats").addEventListener("click", (e) => { const k = e.target.closest(".chip")?.dataset.k; if (k === undefined) return; filter = k || null; load(); });
+window.showView = (v) => {
+  const isList = v === "list";
+  $("#tabList").classList.toggle("on", isList);
+  $("#tabProfile").classList.toggle("on", !isList);
+  $("#searchbar").style.display = isList ? "flex" : "none";
+  $("#list").style.display = isList ? "flex" : "none";
+  $("#profile").style.display = isList ? "none" : "flex";
+  if (!isList) loadProfile();
+};
+const KCOL = { preference: "#c8402e", fact: "#2563eb", todo: "#b45309", procedure: "#0f766e", episode: "#71717a" };
+const fmt = (t) => esc(t).split("\\n").join("<br>");
+window.loadProfile = async () => {
+  const d = await (await fetch("/api/profile")).json();
+  const el = $("#profile");
+  const chip = (m) => {
+    const c = KCOL[m.kind] ?? "#666";
+    const when = m.updated_at ? '<span class="when">' + m.updated_at.slice(0, 10) + "</span>" : "";
+    return '<div class="prow"><span class="dot" style="background:' + c + '"></span><span>' + esc(m.content) + "</span>" + when + "</div>";
+  };
+  const card = (title, rows) => '<div class="pcard"><h3>' + title + '</h3><div class="plist">' + (rows || '<span class="meta">暂无</span>') + "</div></div>";
+  const c = d.cached;
+  let llmBlock;
+  if (c && c.summary) {
+    llmBlock = '<div class="pcard"><div class="genbar"><button onclick="regenProfile(this)">重新生成</button><span class="meta">LLM 画像 · ' + (c.generated_at || "").slice(0, 16).replace("T", " ") + '</span></div><div class="psummary">' + fmt(c.summary) + "</div></div>";
+  } else {
+    llmBlock = '<div class="pcard"><div class="genbar"><button onclick="regenProfile(this)">生成 LLM 画像</button><span class="meta">把 ' + (d.identity.length + d.preferences.length + d.procedures.length) + " 条记忆交给模型蒸馏成一段肖像</span></div></div>";
+  }
+  const ongoing = d.identity.filter((m) => /lm-memory|项目|dsh-ui/.test(m.content));
+  el.innerHTML = llmBlock
+    + '<div class="two">'
+    + card("偏好", d.preferences.map(chip).join(""))
+    + card("待办与正在做的事", d.todos.concat(ongoing).map(chip).join(""))
+    + "</div>"
+    + card("事实与环境", d.identity.map(chip).join(""))
+    + card("经验教训", d.procedures.map(chip).join(""))
+    + (d.episodes.length ? card("最近足迹", d.episodes.map(chip).join("")) : "");
+};
+window.regenProfile = async (btn) => {
+  btn.disabled = true; btn.textContent = "蒸馏中…";
+  await fetch("/api/profile/refresh", { method: "POST" });
+  loadProfile();
+};
 let t; $("#q").addEventListener("input", (e) => { clearTimeout(t); t = setTimeout(() => { query = e.target.value.trim(); load(); }, 300); });
 load();
 </script></body></html>`;
@@ -161,6 +259,18 @@ http.createServer(async (req, res) => {
       for (const m of all) counts[m.kind] = (counts[m.kind] ?? 0) + 1;
       for (const m of items) m.date = m.date ?? m.updated_at;
       return json({ items, total: all.length, counts });
+    }
+    if (req.method === "GET" && u.pathname === "/api/profile") {
+      const all = Array.isArray(await call("memory_list", { limit: 100 })) ? await call("memory_list", { limit: 100 }) : [];
+      const by = (k) => all.filter((m) => m.kind === k);
+      return json({
+        cached: cachedProfile(),
+        identity: by("fact"), preferences: by("preference"), todos: by("todo"),
+        procedures: by("procedure"), episodes: by("episode").slice(-5).reverse(),
+      });
+    }
+    if (req.method === "POST" && u.pathname === "/api/profile/refresh") {
+      return json(await genProfile());
     }
     if (req.method === "GET" && u.pathname.startsWith("/api/history/")) {
       const id = Number(u.pathname.split("/").pop());
