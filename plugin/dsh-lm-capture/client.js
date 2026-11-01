@@ -38,7 +38,7 @@ window.__ModuleLoader__.load({
 					"最近记忆：",
 					createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 4 } },
 						state.items.map((m) => createElement("div", { key: m.id },
-							"[" + (kindLabel[m.kind] ?? m.kind) + "] " + String(m.content).slice(0, 60))))))
+							"[" + (kindLabel[m.kind] ?? m.kind) + "] " + String(m.content).slice(0, 60)))))
 			);
 		}
 
