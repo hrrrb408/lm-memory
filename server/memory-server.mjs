@@ -443,6 +443,23 @@ server.registerTool("memory_list", {
 const transport = new StdioServerTransport();
 ingestPending();
 if (EMB_ENABLED) void backfillEmbeddings(); // 后台回填，不阻塞启动
+void (async () => { // 孤儿提炼任务回收：宿主退出时派发的任务若未能执行，这里补跑（>2 分钟旧的，最多 3 个）
+  try {
+    const jobsDir = path.join(MEM_DIR, "extraction-jobs");
+    if (!fs.existsSync(jobsDir)) return;
+    const { spawn } = await import("node:child_process");
+    const cand = fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).map((f) => path.join(jobsDir, f))
+      .filter((f) => Date.now() - fs.statSync(f).mtimeMs > 120000).slice(0, 3);
+    if (!cand.length) return;
+    const helper = [path.join(MEM_DIR, "plugin", "dsh-lm-capture", "lib", "extract-helper.mjs"), path.join(path.dirname(new URL(import.meta.url).pathname), "../plugin/dsh-lm-capture/lib/extract-helper.mjs")].find((p) => fs.existsSync(p));
+    if (!helper) return;
+    for (const job of cand) {
+      const ch = spawn(process.execPath, [helper, job], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
+      ch.unref();
+    }
+    audit("orphan_jobs_respawn", { count: cand.length });
+  } catch (e) { console.error("[memory] orphan respawn:", e.message); }
+})();
 await server.connect(transport);
 audit("server_started", { db: DB_PATH, pid: process.pid });
 process.on("exit", (code) => audit("server_exit", { code }));
