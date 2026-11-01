@@ -1,18 +1,18 @@
 {
   "n": 30,
   "accA": 0,
-  "accB": 0.36666666666666664,
+  "accB": 0.4,
   "evHit": 0.8666666666666667,
-  "evAndB": 0.38461538461538464,
+  "evAndB": 0.4230769230769231,
   "results": [
     {
       "q": "What degree did I graduate with?",
       "type": "single-session-user",
       "gold": "Business Administration",
       "ansA": "UNKNOWN",
-      "ansB": "A degree in Business Administration.",
+      "ansB": "You graduated with a degree in Business Administration.",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     },
     {
@@ -20,9 +20,9 @@
       "type": "single-session-user",
       "gold": "45 minutes each way",
       "ansA": "UNKNOWN",
-      "ansB": "45 minutes each way (90 minutes total daily).",
+      "ansB": "Your commute takes 45 minutes each way.",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     },
     {
@@ -30,9 +30,9 @@
       "type": "single-session-user",
       "gold": "Target",
       "ansA": "UNKNOWN",
-      "ansB": "You redeemed it at Target, using a coupon you found in your email inbox.",
+      "ansB": "",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     },
     {
@@ -42,7 +42,7 @@
       "ansA": "UNKNOWN",
       "ansB": "The Glass Menagerie",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -52,7 +52,7 @@
       "ansA": "UNKNOWN",
       "ansB": "Summer Vibes",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -70,7 +70,7 @@
       "type": "single-session-user",
       "gold": "Serenity Yoga",
       "ansA": "UNKNOWN",
-      "ansB": "You take yoga classes at a studio (with a connection to Serenity Yoga), suppleme",
+      "ansB": "You take yoga classes at Serenity Yoga (supplemented by home practice with the D",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -90,7 +90,7 @@
       "type": "single-session-user",
       "gold": "February 14th",
       "ansA": "UNKNOWN",
-      "ansB": "You volunteered at the \"Love is in the Air\" fundraising dinner on Valentine's Da",
+      "ansB": "Valentine's Day (in February).",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -142,7 +142,7 @@
       "ansA": "UNKNOWN",
       "ansB": "University of Melbourne",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     },
     {
@@ -150,9 +150,9 @@
       "type": "single-session-user",
       "gold": "10%",
       "ansA": "UNKNOWN",
-      "ansB": "A 10% discount on your first purchase.",
+      "ansB": "A 10% discount.",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -170,7 +170,7 @@
       "type": "single-session-user",
       "gold": "a yellow dress",
       "ansA": "UNKNOWN",
-      "ansB": "You bought her a yellow dress and a pair of earrings to match it.",
+      "ansB": "A yellow dress and a pair of earrings to match it.",
       "A": "wrong",
       "B": "wrong",
       "evidenceHit": true
@@ -190,7 +190,7 @@
       "type": "single-session-user",
       "gold": "7",
       "ansA": "UNKNOWN",
-      "ansB": "You packed 7 shirts for your trip to Costa Rica.",
+      "ansB": "You packed 7 shirts for your Costa Rica trip.",
       "A": "wrong",
       "B": "correct",
       "evidenceHit": true
@@ -200,9 +200,9 @@
       "type": "single-session-user",
       "gold": "A staunch atheist",
       "ansA": "UNKNOWN",
-      "ansB": "You used to be a staunch atheist.",
+      "ansB": "A staunch atheist.",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -212,7 +212,7 @@
       "ansA": "UNKNOWN",
       "ansB": "Nike",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -220,9 +220,9 @@
       "type": "single-session-user",
       "gold": "Data Science",
       "ansA": "UNKNOWN",
-      "ansB": "You completed a certification in Data Science.",
+      "ansB": "Data Science.",
       "A": "wrong",
-      "B": "wrong",
+      "B": "correct",
       "evidenceHit": true
     },
     {
@@ -252,7 +252,7 @@
       "ansA": "UNKNOWN",
       "ansB": "12",
       "A": "wrong",
-      "B": "correct",
+      "B": "wrong",
       "evidenceHit": true
     },
     {
@@ -270,7 +270,7 @@
       "type": "single-session-user",
       "gold": "Luna",
       "ansA": "UNKNOWN",
-      "ansB": "Luna",
+      "ansB": "Luna.",
       "A": "wrong",
       "B": "correct",
       "evidenceHit": false
