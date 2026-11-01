@@ -116,9 +116,13 @@ node server/viewer.mjs        # 默认 http://127.0.0.1:7640
 
 只绑 127.0.0.1 的薄壳页面：搜索（走完整检索管线）、类型过滤、版本历史查看、修正（乐观并发）、逻辑删除、**用户画像**（LLM 蒸馏 + 确定性分区）。业务逻辑全部经 MCP 走 memory-server，零重复实现。
 
-**DSH 内入口**：`dsh-lm-capture` 插件配置 `viewer: <端口>` 后——
-- DSH 启动时自动拉起 viewer（端口探测去重，不重复进程）
-- Web 界面左下角注入「🧠 记忆」悬浮按钮（与鲸鱼挂件同一 `webserver/index-inject` 通道），显示记忆总数，点击直达管理页
+**DSH 内入口**：`dsh-lm-capture` 插件随宿主启动——
+- 自动拉起 viewer（端口探测去重，不重复进程；需真实 node：DSH 自带的 `runtime/bin/node` 是依赖环境变量的壳脚本，直接 spawn 会静默失败）
+- **设置 → 记忆库**（`settings.section` 插槽，与 WeChat/桌宠同协议）：实时状态、记忆总数、最近记忆速览、一键打开完整管理页
+
+**安装（DSH bundle 方式）**：插件包自带 `cordis.patch.yml`，注册进 profile 的 `dsh.profile.bundles` 即可（与 wechat/pet 同机制）。两个易踩的坑：
+1. bundle 层**只应用 `insert:` 块内的条目**，裸条目会被静默忽略
+2. `package.json` 的 `exports` 必须同时导出 `.`、`./client`、`./package.json` 三条——少一条，client 扫描器会静默跳过整个包
 
 ## 质量测评
 
