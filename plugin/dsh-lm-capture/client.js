@@ -34,11 +34,11 @@ window.__ModuleLoader__.load({
 						style: { cursor: "pointer", fontSize: 13, padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit" },
 						onClick: () => window.open(VIEWER, "_blank"),
 					}, "打开完整管理页（搜索 · 修正 · 删除 · 用户画像）")),
-				state.items.length && createElement("div", { style: { fontSize: 12.5, color: "#666" } },
+				state.items.length ? createElement("div", { style: { fontSize: 12.5, color: "#666" } },
 					"最近记忆：",
 					createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 4 } },
 						state.items.map((m) => createElement("div", { key: m.id },
-							"[" + (kindLabel[m.kind] ?? m.kind) + "] " + String(m.content).slice(0, 60)))))
+							"[" + (kindLabel[m.kind] ?? m.kind) + "] " + String(m.content).slice(0, 60))))) : null
 			);
 		}
 

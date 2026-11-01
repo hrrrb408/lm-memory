@@ -40,9 +40,10 @@ function extractUserTexts(session) {
 }
 
 function resolveNode() {
+  // 注意：DSH 自带的 runtime/bin/node 是壳脚本，依赖 DSH_DESKTOP_NODE_EXECUTABLE
+  // 环境变量，宿主进程 env 里没有 → exec 空命令秒死。必须用真 node。
   const candidates = [
     process.env.DSH_NODE,
-    "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/bin/node",
     "/opt/homebrew/bin/node",
     "/usr/local/bin/node",
   ].filter(Boolean);
