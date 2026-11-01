@@ -1,0 +1,19 @@
+# dsh-lm-capture —— Living Memory 全家桶自带挂载声明
+# （采集插件 + lm-memory MCP server 接线，bundle 方式注册，不依赖 profile 手工条目）
+- id: lm-capture
+  name: dsh-lm-capture
+  config:
+    minUserMessages: 2
+    memoryDir: /Users/huangruibang/.dsh/memory
+    viewer: 7640
+- insert:
+    - id: mcp-lm-memory
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: lm_memory
+        transport: stdio
+        command: node
+        args:
+          - /Users/huangruibang/.dsh/memory/server/memory-server.mjs
+        env:
+          LM_MEMORY_DIR: /Users/huangruibang/.dsh/memory
