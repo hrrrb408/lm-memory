@@ -128,6 +128,32 @@ LM_MEMORY_DIR=/tmp/lm-eval node recall-eval.mjs   # 三档召回基准
 - v0.9 读时工程：LoCoMo 总分 0.20 → 0.73（摘要时间线 + 日期锚定 + 判分修正）
 - 闭环对照（30 题）：无记忆 0% vs 记忆注入 40%
 
+## 常见问题
+
+### 安装时出现 `ERR_PNPM_IGNORED_BUILDS`（onnxruntime-node / sharp / protobufjs）
+
+**无害，可以忽略。** pnpm 10+ 出于供应链安全默认不执行依赖的构建脚本。这三个包被拦后功能正常：
+
+- `onnxruntime-node`：平台原生二进制直接打包在 npm tarball 里，不依赖安装脚本（实测 macOS arm64 原生加速正常）
+- `sharp` / `protobufjs`：文本嵌入用不到，无影响
+
+想让警告消失（可选），在 profile 的 `pnpm-workspace.yaml` 加：
+
+```yaml
+onlyBuiltDependencies:
+  - onnxruntime-node
+  - protobufjs
+  - sharp
+```
+
+### 首次使用很慢 / 卡在下载
+
+首次启动会下载双语嵌入模型（~56MB）到数据目录的 `models/`，属正常。装完即缓存的机器没有这一步。
+
+### 没有 LLM key 能用吗
+
+能。不配 key 时自动提炼/摘要跳过（不影响检索、遗忘曲线、viewer），手动 `memory_remember` 照常可用。
+
 ## 已知边界
 
 - LongMemEval multi-session（真·跨会话合成）仍弱——瓶颈在答题端而非检索
