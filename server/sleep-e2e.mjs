@@ -6,6 +6,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR;
 if (!MEM_DIR || MEM_DIR === path.join(process.env.HOME, ".dsh", "memory")) { console.error("拒绝在真实库上跑测试"); process.exit(2); }
@@ -16,7 +17,7 @@ fs.mkdirSync(MEM_DIR, { recursive: true });
 const c = new Client({ name: "sleep-e2e", version: "0.7" });
 await c.connect(new StdioClientTransport({
   command: process.execPath,
-  args: [new URL("./memory-server.mjs", import.meta.url).pathname],
+  args: [fileURLToPath(new URL("./memory-server.mjs", import.meta.url))],
   env: { ...process.env, LM_MEMORY_DIR: MEM_DIR, LM_EMBED: "0" },
 }));
 const call = async (name, args = {}) => (await c.callTool({ name, arguments: args })).content[0].text;

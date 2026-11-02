@@ -8,10 +8,11 @@ import os from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.argv[2] || 7640);
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".dsh", "memory");
-const SERVER = path.join(path.dirname(new URL(import.meta.url).pathname), "memory-server.mjs");
+const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), "memory-server.mjs");
 const DB_PATH = path.join(MEM_DIR, "memory.db");
 
 let mcp = null;
