@@ -20,8 +20,8 @@
         serverName: lm_memory
         transport: stdio
         # GUI 启动的宿主 PATH 里没有 homebrew node，裸 `node` 会 spawn 失败导致 MCP 断连。
-        # 动态解析真实 node：DSH_NODE → homebrew → usr/local
-        command: !!js process.env.DSH_NODE || (process.getBuiltinModule('node:fs').existsSync('/opt/homebrew/bin/node') ? '/opt/homebrew/bin/node' : '/usr/local/bin/node')
+        # 动态解析真实 node（注意：表达式里不能出现「冒号+空格」，YAML 会当成嵌套映射）：
+        command: !!js process.env.DSH_NODE || ['/opt/homebrew/bin/node', '/usr/local/bin/node'].find(p => process.getBuiltinModule('node:fs').existsSync(p)) || 'node'
         args:
           - !!js (process.env.DSH_PROFILE_DIR || ((process.env.DSH_HOME || process.env.HOME + '/.dsh') + '/profiles/' + (process.env.DSH_PROFILE || 'default'))) + '/node_modules/dsh-lm-memory/server/memory-server.mjs'
         env:
