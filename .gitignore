@@ -4,3 +4,4 @@ node_modules/
 *.db-shm
 *.jsonl
 .DS_Store
+node_modules/
