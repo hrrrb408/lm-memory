@@ -106,6 +106,7 @@ nav{max-width:860px;margin:-14px auto 16px;display:flex;gap:2px;font-size:13.5px
 nav a{padding:6px 14px;border-radius:8px;cursor:pointer;color:var(--muted)}
 nav a.on{background:var(--ink);color:#fff}
 #profile{max-width:860px;margin:0 auto;display:none;flex-direction:column;gap:14px}
+#dormant{max-width:860px;margin:0 auto;display:none;flex-direction:column;gap:10px}
 .pcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
 .pcard h3{font-family:"Songti SC",Georgia,serif;font-size:16px;font-weight:600;margin-bottom:10px;color:var(--ink)}
 .psummary{white-space:pre-wrap;font-size:14.5px;line-height:1.8}
@@ -124,10 +125,11 @@ nav a.on{background:var(--ink);color:#fff}
 button{font:inherit}
 </style></head><body>
 <header><h1>记忆库</h1><div class="sub" id="sub"></div><div class="stats" id="stats"></div></header>
-<nav><a id="tabList" class="on" onclick="showView('list')">记忆库</a><a id="tabProfile" onclick="showView('profile')">画像</a></nav>
+<nav><a id="tabList" class="on" onclick="showView('list')">记忆库</a><a id="tabProfile" onclick="showView('profile')">画像</a><a id="tabDormant" onclick="showView('dormant')">休眠馆</a></nav>
 <div class="bar" id="searchbar"><input id="q" type="search" placeholder="搜索记忆（走完整检索管线：词法 + 中文语义）…"></div>
 <main id="list"></main>
 <div id="profile"></div>
+<div id="dormant"></div>
 <div class="empty" id="empty" style="display:none">没有匹配的记忆</div>
 <footer>lm-memory viewer · 数据在 ${MEM_DIR} · 操作走 MCP 同一套业务逻辑</footer>
 <script>
@@ -152,10 +154,10 @@ const memCard = (m) => {
   const [label, color] = K[m.kind] ?? [m.kind, "#666"];
   return \`<div class="mem" id="m\${m.id}">
     <div class="top"><span class="badge" style="background:\${color}">\${label}</span>
-    <span class="meta">v\${m.version} · \${(m.date || "").slice(0, 10)} \${m.source === "auto-extract" ? "· 自动提炼" : m.source === "auto-capture" ? "· 自动采集" : ""}</span></div>
+    <span class="meta">v\${m.version} · \${(m.date || "").slice(0, 10)} \${m.source === "auto-extract" ? "· 自动提炼" : m.source === "auto-capture" ? "· 自动采集" : ""}\${m.pinned ? " · 📌" : ""}\${m.hit_count ? " · 召回×" + m.hit_count : ""}</span></div>
     <div class="content">\${esc(m.content)}</div>
     \${m.tags ? \`<div class="meta" style="margin-top:4px">#\${esc(m.tags.split(",").filter(t=>!t.startsWith("session:")).join(" #"))}</div>\` : ""}
-    <div class="acts"><a onclick="correct(\${m.id})">修正</a><a class="danger" onclick="forget(\${m.id})">忘记</a><a onclick="hist(\${m.id})">历史</a></div>
+    <div class="acts"><a onclick="correct(\${m.id})">修正</a><a class="danger" onclick="forget(\${m.id})">忘记</a><a onclick="hist(\${m.id})">历史</a><a onclick="pin(\${m.id}, \${m.pinned ? 0 : 1})">\${m.pinned ? "取消置顶" : "📌 置顶"}</a></div>
     <div id="extra\${m.id}"></div>
   </div>\`;
 };
@@ -188,15 +190,27 @@ window.hist = async (id) => {
   el.innerHTML = h.length <= 1 ? '<div class="hist">无历史版本</div>' :
     h.map((v) => \`<div class="hist \${v.status === "superseded" ? "old" : ""}">v\${v.version} · \${v.status} · \${v.updated_at.slice(0, 10)}<br>\${esc(v.content.slice(0, 120))}</div>\`).join("");
 };
+window.pin = async (id, to) => { await fetch("/api/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: to ? "pin" : "unpin" }) }); if ($("#dormant").style.display !== "none") loadDormant(); else load(); };
+window.wake = async (id) => { await fetch("/api/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: "wake" }) }); loadDormant(); };
+window.runSleep = async () => { const r = await (await fetch("/api/sleep", { method: "POST" })).json(); alert(r.msg || "done"); loadDormant(); };
+window.loadDormant = async () => {
+  const d = await (await fetch("/api/dormant")).json();
+  const el = $("#dormant");
+  el.innerHTML = '<div class="mem"><div class="content">休眠馆：长期未被召回的记忆自动转到这里，不再参与检索与 current.md 基线，但随时可唤醒。宽限期：待办45天 · 会话60天 · 事实/经验120天 · 偏好240天（命中延期+7天/次）<div class="acts"><a onclick="runSleep()">🔄 跑一次整理</a></div></div></div>'
+    + (d.items.length ? d.items.map((m) => {
+      const [label, color] = K[m.kind] ?? [m.kind, "#666"];
+      return \`<div class="mem" style="opacity:.75"><div class="top"><span class="badge" style="background:\${color}">\${label}</span><span class="meta">休眠于 \${(m.updated_at || "").slice(0, 10)}\${m.hit_count ? " · 曾召回×" + m.hit_count : ""}</span></div><div class="content">\${esc(m.content)}</div><div class="acts"><a onclick="wake(\${m.id})">☀️ 唤醒</a><a onclick="pin(\${m.id}, 1)">📌 置顶并唤醒</a></div></div>\`;
+    }).join("") : '<div class="empty">没有休眠记忆 🎉</div>');
+};
 $("#stats").addEventListener("click", (e) => { const k = e.target.closest(".chip")?.dataset.k; if (k === undefined) return; filter = k || null; load(); });
 window.showView = (v) => {
-  const isList = v === "list";
-  $("#tabList").classList.toggle("on", isList);
-  $("#tabProfile").classList.toggle("on", !isList);
-  $("#searchbar").style.display = isList ? "flex" : "none";
-  $("#list").style.display = isList ? "flex" : "none";
-  $("#profile").style.display = isList ? "none" : "flex";
-  if (!isList) loadProfile();
+  for (const t of ["List", "Profile", "Dormant"]) $("#tab" + t).classList.toggle("on", v === t.toLowerCase());
+  $("#searchbar").style.display = v === "list" ? "flex" : "none";
+  $("#list").style.display = v === "list" ? "flex" : "none";
+  $("#profile").style.display = v === "profile" ? "flex" : "none";
+  $("#dormant").style.display = v === "dormant" ? "flex" : "none";
+  if (v === "profile") loadProfile();
+  if (v === "dormant") loadDormant();
 };
 const KCOL = { preference: "#c8402e", fact: "#2563eb", todo: "#b45309", procedure: "#0f766e", episode: "#71717a" };
 const fmt = (t) => esc(t).split("\\n").join("<br>");
@@ -260,6 +274,10 @@ http.createServer(async (req, res) => {
       for (const m of items) m.date = m.date ?? m.updated_at;
       return json({ items, total: all.length, counts });
     }
+    if (req.method === "GET" && u.pathname === "/api/dormant") {
+      const rows = ro().prepare("SELECT id, version, kind, content, tags, updated_at, hit_count, pinned FROM memories WHERE status='dormant' ORDER BY updated_at DESC LIMIT 200").all();
+      return json({ items: rows, total: rows.length });
+    }
     if (req.method === "GET" && u.pathname === "/api/profile") {
       const all = Array.isArray(await call("memory_list", { limit: 100 })) ? await call("memory_list", { limit: 100 }) : [];
       const by = (k) => all.filter((m) => m.kind === k);
@@ -289,6 +307,14 @@ http.createServer(async (req, res) => {
       if (u.pathname === "/api/forget") {
         const r = await call("memory_forget", { id: body.id, reason: "viewer" });
         return json({ ok: String(r).includes("OK"), msg: String(r).slice(0, 80) });
+      }
+      if (u.pathname === "/api/lifecycle") {
+        const r = await call("memory_pin", { id: body.id, action: body.action, reason: "viewer" });
+        return json({ ok: String(r).includes("OK"), msg: String(r).slice(0, 80) });
+      }
+      if (u.pathname === "/api/sleep") {
+        const r = await call("memory_sleep", {});
+        return json({ ok: true, msg: String(r).slice(0, 200) });
       }
     }
     json({ error: "not found" }, 404);

@@ -26,6 +26,16 @@ function markCaptured(sessionId) {
   try { fs.appendFileSync(MARKER, JSON.stringify({ ts: new Date().toISOString(), sessionId }) + "\n"); } catch {}
 }
 
+function extractSessionModel(session) {
+  // 会话真实模型跟随：取最后一条 request/header 的 provider+model（会话中途换模型则以期末为准）
+  try {
+    let last = null;
+    for (const e of session.ownEvents()) {
+      if (e?.type === "request/header") last = e?.data?.header?.config ?? null;
+    }
+    return last && last.provider && last.model ? { provider: last.provider, model: last.model } : null;
+  } catch { return null; }
+}
 function extractUserTexts(session) {
   let events;
   try { events = session.ownEvents(); } catch (e) { log(`ownEvents failed: ${e.message}`); return null; }
@@ -44,10 +54,11 @@ function resolveNode() {
   // 环境变量，宿主进程 env 里没有 → exec 空命令秒死。必须用真 node。
   const candidates = [
     process.env.DSH_NODE,
-    "/opt/homebrew/bin/node",
-    "/usr/local/bin/node",
+    "/opt/homebrew/bin/node",        // macOS homebrew
+    "/usr/local/bin/node",           // macOS 手装
+    "C:\\Program Files\\nodejs\\node.exe", // Windows 默认安装位
   ].filter(Boolean);
-  if (process.execPath && /\/node(\.exe)?$/.test(process.execPath)) return process.execPath;
+  if (process.execPath && /[\\/]node(\.exe)?$/.test(process.execPath)) return process.execPath; // 兼容正/反斜杠
   for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch {} }
   return "node";
 }
@@ -62,6 +73,8 @@ function dispatchExtraction(session, texts, config) {
       date: new Date().toISOString().slice(0, 10),
       cwd: session.header?.cwd ?? "",
       texts,
+      llm: typeof config?.llm === "object" ? config.llm : {}, // {model, baseURL, apiKeyEnv} 显式配置优先
+      sessionModel: extractSessionModel(session) || undefined, // 会话真实模型（request/header），未显式配置时跟随
     }));
         const child = spawn(resolveNode(), [path.join(path.dirname(new URL(import.meta.url).pathname), "extract-helper.mjs"), jobFile], {
       detached: true, stdio: "ignore",

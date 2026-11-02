@@ -1,29 +1,11 @@
 {
   "name": "lm-memory-server",
-  "version": "0.3.0",
-  "description": "Local-first long-term memory MCP server for AI agents (SQLite + FTS5, zero native deps)",
-  "license": "MIT",
+  "version": "0.6.0",
+  "private": true,
   "type": "module",
-  "bin": {
-    "lm-memory-server": "memory-server.mjs"
-  },
-  "main": "memory-server.mjs",
-  "engines": {
-    "node": ">=22.5.0"
-  },
   "dependencies": {
-    "@huggingface/transformers": "^4.3.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^3.23.0"
-  },
-  "keywords": [
-    "mcp",
-    "memory",
-    "agent",
-    "long-term-memory",
-    "sqlite",
-    "fts5",
-    "dsh",
-    "claude-code"
-  ]
+    "zod": "^3.23.0",
+    "@huggingface/transformers": "^3.0.0"
+  }
 }

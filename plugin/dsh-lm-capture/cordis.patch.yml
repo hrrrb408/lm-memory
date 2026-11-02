@@ -1,12 +1,20 @@
 # dsh-lm-capture —— Living Memory 全家桶自带挂载声明
 # 注意：bundle 层只应用 insert: 块内的条目，裸条目会被静默忽略（血泪教训）
+# 路径可移植：!!js 表达式按 DSH_HOME/HOME 动态解析（官方先例 dsh-plugin-chatgpt 同款），macOS/Windows/Linux 通用
 - insert:
     - id: dsh-lm-capture
       name: dsh-lm-capture
       config:
         minUserMessages: 2
-        memoryDir: /Users/huangruibang/.dsh/memory
+        memoryDir: !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory'
         viewer: 7640
+        # llm: 可选，提炼/摘要用的模型（不配则默认「跟随会话模型」——会话用什么模型就用什么，
+        # provider 可映射时自动带 baseURL+key；不可映射回退 glm-5.3-flash。显式 model 一旦设置即接管）
+        # llm:
+        #   model: glm-5.3          # 显式指定即接管（不再跟随会话）
+        #   baseURL: ""             # 默认智谱；换供应商才需要填（OpenAI 兼容）
+        #   apiKeyEnv: ZAI_CODING_CN_API_KEY  # 从 credentials.yaml 读哪个 key
+        # 已知可映射 provider：zai-coding-cn / deepseek-official / deepseek-api-key / agnes
     - id: mcp-lm-memory
       name: '@deepseek-ai/dsh-mcp-client'
       config:
@@ -14,6 +22,6 @@
         transport: stdio
         command: node
         args:
-          - /Users/huangruibang/.dsh/memory/server/memory-server.mjs
+          - !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory/server/memory-server.mjs'
         env:
-          LM_MEMORY_DIR: /Users/huangruibang/.dsh/memory
+          LM_MEMORY_DIR: !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory'
