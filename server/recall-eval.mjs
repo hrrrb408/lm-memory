@@ -7,16 +7,23 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR;
 if (!MEM_DIR || MEM_DIR === path.join(process.env.HOME, ".dsh", "memory")) { console.error("拒绝在真实库上跑评测"); process.exit(2); }
 const DB = path.join(MEM_DIR, "memory.db");
+// 本机已有模型缓存时默认复用：MEM_DIR 会被下方 rmSync 清空，若不独立指定 cacheDir，
+// 每次评测都会重新下载双模型 ~56MB（曾表现为首轮 remember 60s 超时）。
+if (!process.env.LM_EMBED_CACHE) {
+  const def = path.join(process.env.HOME, ".dsh", "memory", "models");
+  if (fs.existsSync(path.join(def, "Xenova"))) process.env.LM_EMBED_CACHE = def;
+}
 fs.rmSync(MEM_DIR, { recursive: true, force: true });
 fs.mkdirSync(MEM_DIR, { recursive: true });
 
 const c = new Client({ name: "recall-eval", version: "0.7" });
 await c.connect(new StdioClientTransport({
-  command: process.execPath, args: [process.env.LM_EVAL_SERVER || new URL("./memory-server.mjs", import.meta.url).pathname],
+  command: process.execPath, args: [process.env.LM_EVAL_SERVER || fileURLToPath(new URL("./memory-server.mjs", import.meta.url))],
   env: { ...process.env, LM_MEMORY_DIR: MEM_DIR },
 }));
 const call = async (n, a = {}) => (await c.callTool({ name: n, arguments: a })).content[0].text;

@@ -1,9 +1,16 @@
 {
   "name": "dsh-lm-memory",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "本地优先的 Agent 长期记忆：MCP server（SQLite+FTS5+双语语义+遗忘曲线）+ DSH 采集插件（会话摘要卡/日期锚定/模型跟随）",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hrrrb408/lm-memory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hrrrb408/lm-memory/issues"
+  },
   "main": "./plugin/lib/index.js",
   "exports": {
     ".": "./plugin/lib/index.js",

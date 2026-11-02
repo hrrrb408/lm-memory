@@ -17,6 +17,7 @@ try { ({ pipeline: hfPipeline, env: hfEnv } = await import("@huggingface/transfo
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 import { runSleepPass } from "./sleep.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
@@ -123,11 +124,16 @@ try {
     db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('emb_model', ?)").run(EMB_MODEL);
   } else db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('emb_model', ?)").run(EMB_MODEL);
 } catch (e) { console.error("[memory] emb meta init:", e.message); }
-if (hfEnv) hfEnv.cacheDir = process.env.LM_EMBED_CACHE || path.join(MEM_DIR, "models");
-if (hfEnv) hfEnv.allowRemoteModels = true;
 // v0.8 英文语义层：bge-small-en（与 zh 同家族；语言路由各管一列，互不干扰）
 const EMB_EN_MODEL = "Xenova/bge-small-en-v1.5";
 const EMB_EN_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "; // bge-en 官方查询前缀
+if (hfEnv) {
+  hfEnv.cacheDir = process.env.LM_EMBED_CACHE || path.join(MEM_DIR, "models");
+  // 双模型已在本地缓存时禁用远端访问：transformers.js 对缓存命中的模型仍可能发起远端清单请求，
+  // 代理/网络抖动会卡住首次嵌入 60s+（recall-eval 曾间歇性 Request timed out）。首装无缓存时仍允许联网下载。
+  const modelCached = (m) => { try { return fs.existsSync(path.join(hfEnv.cacheDir, ...m.split("/"))); } catch { return false; } };
+  hfEnv.allowRemoteModels = !(modelCached(EMB_MODEL) && modelCached(EMB_EN_MODEL));
+}
 let embedderEn = null;
 let embedderEnLoading = null;
 try { db.exec("ALTER TABLE memories ADD COLUMN emb_en BLOB"); } catch {}
@@ -265,7 +271,7 @@ function checkSecret(content) {
 
 // ---------- server ----------
 const server = new McpServer(
-  { name: "lm-memory", version: "0.8.0" },
+  { name: "lm-memory", version: "0.9.1" },
   {
     capabilities: { tools: {} },
     instructions:
@@ -553,7 +559,7 @@ server.registerTool("memory_sleep", {
 
 const transport = new StdioServerTransport();
 ingestPending();
-if (EMB_ENABLED) void backfillEmbeddings(); // 后台回填，不阻塞启动
+if (EMB_ENABLED) { void getEmbedder().then(() => getEmbedderEn()); void backfillEmbeddings(); } // 启动即预热双模型 + 后台回填（空库时 backfill 无活，预热让首次写入免付冷启动）
 try { const sr = runSleepPass(db, audit); if (sr.decayed) regenerateCurrentMd(); } catch (e) { console.error("[memory] startup sleep pass:", e.message); } // v0.7 启动整理
 setInterval(() => { try { const sr = runSleepPass(db, audit); if (sr.decayed) regenerateCurrentMd(); void backfillEmbeddings(); } catch {} }, 12 * 3600 * 1000).unref(); // 每 12h 巡检 + 补嵌（helper 直写的行没有向量）
 void (async () => { // 孤儿提炼任务回收：宿主退出时派发的任务若未能执行，这里补跑（>2 分钟旧的，最多 3 个）
@@ -564,7 +570,11 @@ void (async () => { // 孤儿提炼任务回收：宿主退出时派发的任务
     const cand = fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).map((f) => path.join(jobsDir, f))
       .filter((f) => Date.now() - fs.statSync(f).mtimeMs > 120000).slice(0, 3);
     if (!cand.length) return;
-    const helper = [path.join(MEM_DIR, "plugin", "dsh-lm-capture", "lib", "extract-helper.mjs"), path.join(path.dirname(new URL(import.meta.url).pathname), "../plugin/dsh-lm-capture/lib/extract-helper.mjs")].find((p) => fs.existsSync(p));
+    const helper = [
+      path.join(MEM_DIR, "plugin", "dsh-lm-capture", "lib", "extract-helper.mjs"), // 旧手工部署
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/lib/extract-helper.mjs"), // 包形态（server/ → ../plugin/lib）
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/dsh-lm-capture/lib/extract-helper.mjs"), // 旧手工部署（server/ 同级）
+    ].find((p) => fs.existsSync(p));
     if (!helper) return;
     for (const job of cand) {
       const ch = spawn(process.execPath, [helper, job], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
