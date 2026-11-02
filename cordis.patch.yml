@@ -1,0 +1,26 @@
+# dsh-lm-memory —— Living Memory 全家桶挂载声明（npm/GitHub 包形态）
+# 路径全部动态解析：DSH_PROFILE_DIR 找到 profile 的 node_modules，DSH_HOME/HOME 定位数据目录。
+# 平台无关（macOS / Windows / Linux）。注意：bundle 层只应用 insert: 块内的条目。
+- insert:
+    - id: dsh-lm-memory
+      name: dsh-lm-memory
+      config:
+        minUserMessages: 2
+        memoryDir: !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory'
+        viewer: 7640
+        # llm: 可选，提炼/摘要用的模型（不配则默认「跟随会话模型」；显式 model 一旦设置即接管）
+        # llm:
+        #   model: glm-5.3
+        #   baseURL: ""
+        #   apiKeyEnv: ZAI_CODING_CN_API_KEY
+        # 已知可映射 provider：zai-coding-cn / deepseek-official / deepseek-api-key / agnes
+    - id: mcp-lm-memory
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: lm_memory
+        transport: stdio
+        command: node
+        args:
+          - !!js (process.env.DSH_PROFILE_DIR || ((process.env.DSH_HOME || process.env.HOME + '/.dsh') + '/profiles/' + (process.env.DSH_PROFILE || 'default'))) + '/node_modules/dsh-lm-memory/server/memory-server.mjs'
+        env:
+          LM_MEMORY_DIR: !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory'

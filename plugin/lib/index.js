@@ -123,8 +123,11 @@ export default function apply(ctx, config) {
       const port = Number(config.viewer);
       fetch("http://127.0.0.1:" + port + "/api/memories").catch(() => {
         try {
-          const viewerPath = path.join(path.dirname(new URL(import.meta.url).pathname), "../../../server/viewer.mjs");
-          if (fs.existsSync(viewerPath)) {
+          const libDir = path.dirname(new URL(import.meta.url).pathname);
+          // 包形态：plugin/lib → ../../server；旧手工部署：plugin/dsh-lm-capture/lib → ../../../server
+          const viewerPath = ["../../server/viewer.mjs", "../../../server/viewer.mjs"]
+            .map((r) => path.join(libDir, r)).find((p) => fs.existsSync(p));
+          if (viewerPath) {
             import("node:child_process").then(({ spawn: sp }) => {
               const ch = sp(resolveNode(), [viewerPath, String(port)], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
               ch.unref();

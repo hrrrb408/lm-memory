@@ -59,20 +59,17 @@ Node.js ≥ 22.5（内置 `node:sqlite`；推荐 24+）。任何平台。
 claude mcp add lm_memory -s user -- node /path/to/lm-memory/server/memory-server.mjs
 ```
 
-### DSH
+### DSH（推荐：包安装）
 
-```bash
-# server 拷到数据目录
-mkdir -p ~/.dsh/memory && cp -r server ~/.dsh/memory/
-cd ~/.dsh/memory/server && npm install
+profile 的 `package.json` → `dependencies` 加：
 
-# 插件以 link 依赖注册进 profile
-# profile package.json → dependencies 加：
-#   "dsh-lm-capture": "link:<本仓库>/plugin/dsh-lm-capture"
-# dsh.profile.bundles 加 "dsh-lm-capture"，然后 pnpm install，重启 DSH
+```json
+"dsh-lm-memory": "github:hrrrb408/lm-memory"
 ```
 
-插件自带 `cordis.patch.yml`（路径用 `!!js` 表达式动态解析，无需手改）。
+`dsh.profile.bundles` 加 `"dsh-lm-memory"`，然后 `pnpm install`，重启 DSH。一条依赖搞定 server + 插件 + 依赖（`.pnpm` 结构自动解析 server 的 import）。
+
+> 数据目录 `~/.dsh/memory/` 与包安装位置无关，升级/重装不动数据。
 
 ### 提炼模型配置（可选）
 
