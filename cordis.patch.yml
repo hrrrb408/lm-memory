@@ -1,5 +1,5 @@
 # dsh-lm-memory —— Living Memory 全家桶挂载声明（npm/GitHub 包形态）
-# 路径全部动态解析：DSH_PROFILE_DIR 找到 profile 的 node_modules，DSH_HOME/HOME 定位数据目录。
+# 数据目录由 DSH_HOME/HOME 定位；MCP 指向插件写入的稳定 shim（见 plugin/lib/index.js writeServerShim）。
 # 平台无关（macOS / Windows / Linux）。注意：bundle 层只应用 insert: 块内的条目。
 - insert:
     - id: dsh-lm-memory
@@ -23,6 +23,10 @@
         # 动态解析真实 node（注意：表达式里不能出现「冒号+空格」，YAML 会当成嵌套映射）：
         command: !!js process.env.DSH_NODE || ['/opt/homebrew/bin/node', '/usr/local/bin/node'].find(p => process.getBuiltinModule('node:fs').existsSync(p)) || 'node'
         args:
-          - !!js (process.env.DSH_PROFILE_DIR || ((process.env.DSH_HOME || process.env.HOME + '/.dsh') + '/profiles/' + (process.env.DSH_PROFILE || 'default'))) + '/node_modules/dsh-lm-memory/server/memory-server.mjs'
+          # 指向插件在宿主启动时重写的稳定启动器（~/.dsh/memory/bin/）。
+          # 不能直接指向 node_modules 里的服务器：GUI 宿主环境没有 DSH_PROFILE_DIR/DSH_PROFILE，
+          # 动态解析会回退到不存在的 profiles/default → spawn ENOENT → MCP 永久断连。
+          # shim 路径只依赖 HOME（任何宿主都有）；真实服务器路径由插件按自身安装位置写入。
+          - !!js ((process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory/bin/lm-memory-server.mjs')
         env:
           LM_MEMORY_DIR: !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory'
