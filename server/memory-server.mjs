@@ -511,7 +511,7 @@ server.registerTool("memory_forget", {
 server.registerTool("memory_list", {
   title: "列出",
   description: "按种类列出最近的有效记忆。",
-  inputSchema: { kind: z.enum(KINDS).optional(), limit: z.number().int().min(1).max(100).default(20) },
+  inputSchema: { kind: z.enum(KINDS).optional(), limit: z.number().int().min(1).max(1000).default(20) },
 }, async ({ kind, limit }) => {
   const rows = db.prepare(`SELECT id, version, kind, content, tags, updated_at, hit_count, pinned FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""} ORDER BY updated_at DESC LIMIT ?`)
     .all(...(kind ? [kind, limit] : [limit]));

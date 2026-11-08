@@ -39,7 +39,7 @@ async function llm(prompt) {
     try {
       const r = await fetch("https://open.bigmodel.cn/api/coding/paas/v4/chat/completions", {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model: "glm-5.3-flash", messages: [{ role: "user", content: prompt }], max_tokens: 2500, temperature: 0.2 }),
+        body: JSON.stringify({ model: "glm-5.3-flash", messages: [{ role: "user", content: prompt }], max_tokens: 8000, temperature: 0.2 }),
       });
       const t = (await r.json()).choices?.[0]?.message?.content ?? "";
       if (t) return t;
@@ -49,12 +49,13 @@ async function llm(prompt) {
   return "";
 }
 async function genProfile() {
-  const all = await call("memory_list", { limit: 100 });
-  const body = all.map((m) => `[${m.kind}] ${m.content}`).join("\n").slice(0, 9000);
+  const all = await call("memory_list", { limit: 1000 });
+  const body = all.map((m) => `[${m.kind}] ${m.content}`).join("\n").slice(0, 30000);
   const out = await llm(`以下是一个记忆系统中关于某用户的全部记忆。请生成一份克制的用户画像：
 - 第一段：一句话概括这个人（客观，不吹捧，50字内）
 - 然后四个小节：**身份与环境** / **偏好与沟通风格** / **正在做的事** / **待办提醒**（有的话）
 - 只用记忆里有的信息，不推测；信息少就少写
+- 学业/学位表述必须逐字对齐记忆原文（如「大四」「延毕」「答辩通过」），**严禁升格或脑补学位**（禁止把本科大四写成硕士/研究生毕业）；人名/署名同理逐字对齐
 - 结尾列 6-12 个关键词 chips（用、分隔）
 
 记忆库：
@@ -266,10 +267,10 @@ http.createServer(async (req, res) => {
         const r = await call("memory_recall", { query: q, limit: 20 });
         items = Array.isArray(r) ? r.map((x) => ({ ...x, version: x.v })) : [];
       } else {
-        const r = await call("memory_list", { limit: 100 });
+        const r = await call("memory_list", { limit: 1000 });
         items = (Array.isArray(r) ? r : []).filter((x) => !kind || x.kind === kind);
       }
-      const all = Array.isArray(await call("memory_list", { limit: 100 })) ? await call("memory_list", { limit: 100 }) : [];
+      const all = Array.isArray(await call("memory_list", { limit: 1000 })) ? await call("memory_list", { limit: 1000 }) : [];
       const counts = {};
       for (const m of all) counts[m.kind] = (counts[m.kind] ?? 0) + 1;
       for (const m of items) m.date = m.date ?? m.updated_at;
@@ -280,7 +281,7 @@ http.createServer(async (req, res) => {
       return json({ items: rows, total: rows.length });
     }
     if (req.method === "GET" && u.pathname === "/api/profile") {
-      const all = Array.isArray(await call("memory_list", { limit: 100 })) ? await call("memory_list", { limit: 100 }) : [];
+      const all = Array.isArray(await call("memory_list", { limit: 1000 })) ? await call("memory_list", { limit: 1000 }) : [];
       const by = (k) => all.filter((m) => m.kind === k);
       return json({
         cached: cachedProfile(),
