@@ -4,7 +4,7 @@
 // 追加到 ~/.dsh/memory/pending-episodes.jsonl；由 lm-memory MCP server 在启动/召回时入库。
 // 纪律：任何异常都不得抛出宿主进程；只写 stderr；幂等（同一 session 只采一次）。
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -88,6 +88,44 @@ function writeServerShim() {
     fs.writeFileSync(shimPath, content);
     log("server shim written: " + shimPath);
   } catch (e) { log("shim write error: " + (e?.message ?? e)); }
+}
+
+// ===== viewer 旧版自动升级（v0.10）=====
+// 病灶：viewer 是 detached 进程，DSH app 重启杀不掉它；旧 viewer 占着端口且它 spawn 的
+// MCP server 子进程也是旧代码（无 announce）→ 管理页写操作永远不进变更热流。
+// 解法：探测 /api/version——缺端点或版本号 < 当前包版本 → 找到 pid（端点返回或 lsof 兜底）
+// → SIGTERM → 拉起新 viewer。find/sleep 用 execFileSync 避免 async 噪音；一切异常静默。
+const execFileSyncSafe = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: "utf8", timeout: 3000 }).trim(); } catch { return ""; } };
+function pkgVersion() {
+  try { return JSON.parse(fs.readFileSync(path.join(libDir(), "../../package.json"), "utf8")).version || "0.0.0"; } catch { return "0.0.0"; }
+}
+function cmpVersion(a, b) {
+  const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
+  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d < 0 ? -1 : 1; }
+  return 0;
+}
+async function ensureFreshViewer(port) {
+  const url = "http://127.0.0.1:" + port;
+  let remote = null;
+  try {
+    const r = await fetch(url + "/api/version", { signal: AbortSignal.timeout(1500) });
+    if (r.ok) remote = await r.json();
+  } catch {}
+  const want = pkgVersion();
+  if (remote && typeof remote.version === "string" && cmpVersion(remote.version, want) >= 0) return; // 已是新版，不动
+  // 旧版/无端点 → 找 pid：优先端点返回，lsof 兜底（首次升级时旧 viewer 没有端点）
+  let pid = Number(remote?.pid) || 0;
+  if (!pid) {
+    const out = execFileSyncSafe("lsof", ["-ti", ":" + port, "-sTCP:LISTEN"]).split("\n").map(Number).filter((n) => n > 1);
+    pid = out[0] || 0;
+  }
+  if (pid > 1) {
+    const cmdline = execFileSyncSafe("ps", ["-p", String(pid), "-o", "command="]);
+    if (/viewer\.mjs/.test(cmdline)) {
+      try { process.kill(pid, "SIGTERM"); log(`old viewer (pid ${pid}) terminated, respawning…`); } catch {}
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
 }
 
 function dispatchExtraction(session, texts, config) {
@@ -232,23 +270,25 @@ export default function apply(ctx, config) {
     if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
     // MCP 稳定启动器：每次宿主启动重写，路径只依赖 HOME（见 writeServerShim 注释）
     writeServerShim();
-    // viewer 自启（config.viewer = 端口号；先探测端口，活着就不重复拉起）
+    // viewer 自启（config.viewer = 端口号）：先探测/升级旧版 viewer（v0.10），再确保有活的最新版
     if (config?.viewer) {
       const port = Number(config.viewer);
-      fetch("http://127.0.0.1:" + port + "/api/memories").catch(() => {
+      void ensureFreshViewer(port).then(async () => {
+        let alive = false;
         try {
-          // 包形态：plugin/lib → ../../server；旧手工部署：plugin/dsh-lm-capture/lib → ../../../server
-          const viewerPath = ["../../server/viewer.mjs", "../../../server/viewer.mjs"]
-            .map((r) => path.join(libDir(), r)).find((p) => fs.existsSync(p));
-          if (viewerPath) {
-            import("node:child_process").then(({ spawn: sp }) => {
-              const ch = sp(resolveNode(), [viewerPath, String(port)], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
-              ch.unref();
-              log("viewer spawned on " + port);
-            });
-          }
-        } catch (e) { log("viewer spawn error: " + (e?.message ?? e)); }
-      });
+          const r = await fetch("http://127.0.0.1:" + port + "/api/version", { signal: AbortSignal.timeout(1500) });
+          alive = r.ok; // 只有新版 viewer 才有此端点
+        } catch {}
+        if (alive) { log("viewer already fresh on " + port); return; }
+        // 包形态：plugin/lib → ../../server；旧手工部署：plugin/dsh-lm-capture/lib → ../../../server
+        const viewerPath = ["../../server/viewer.mjs", "../../../server/viewer.mjs"]
+          .map((r) => path.join(libDir(), r)).find((p) => fs.existsSync(p));
+        if (viewerPath) {
+          const ch = spawn(resolveNode(), [viewerPath, String(port)], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
+          ch.unref();
+          log("viewer spawned on " + port);
+        }
+      }).catch((e) => log("viewer ensure error: " + (e?.message ?? e)));
     }
     // 悬浮按钮已移除：设置 → 记忆库 是正式入口（用户反馈悬浮球多余）
     const sessions = new Map();

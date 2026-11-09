@@ -47,7 +47,8 @@ memory_remember/correct/forget/pin/unpin/wake/sleep
 - **基线语义**：会话首次 step 前的存量变更不推送（插件部署/会话启动前的记忆不算"新"）
 - **多会话隔离**：每个会话独立 offset，A 会话的推送不影响 B
 - **开关**：插件配置 `refresh: false` 一键关闭；viewer 管理页的写操作走 MCP 工具处理器，热流自动覆盖
-- **验证**：`node server/refresh-e2e.mjs` 全链路 22 断言（写流→读流→注入→幂等→隔离→半行→reject 透传）
+- **viewer 旧版自动升级（v0.10）**：viewer 是 detached 进程，app 重启杀不掉——插件启动时探测 `/api/version`（缺端点或版本旧 → lsof 定位端口 pid、ps 校验命令行含 viewer.mjs 防误杀 → SIGTERM → 拉起新 viewer），否则管理页写操作会永远走旧 server、不进热流
+- **验证**：`node server/refresh-e2e.mjs` 全链路 22 断言；`node server/viewer-e2e.mjs` 升级路径 5 断言（写流→读流→注入→幂等→隔离→半行→reject 透传；旧版 kill→新版拉起→不重复重启）
 
 ## 架构
 

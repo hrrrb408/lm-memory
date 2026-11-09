@@ -14,6 +14,8 @@ const PORT = Number(process.argv[2] || 7640);
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".dsh", "memory");
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), "memory-server.mjs");
 const DB_PATH = path.join(MEM_DIR, "memory.db");
+// v0.10：包版本（读包根 package.json），/api/version 端点暴露——插件据此自动升级旧 viewer
+const PKG_VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version || "0.0.0"; } catch { return "0.0.0"; } })();
 
 let mcp = null;
 async function call(name, args) {
@@ -258,6 +260,10 @@ http.createServer(async (req, res) => {
     if (req.method === "GET" && u.pathname === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(PAGE);
+    }
+    // v0.10 版本端点：供插件探测旧版 viewer 并自动升级重启（detached 进程 app 重启杀不掉）
+    if (req.method === "GET" && u.pathname === "/api/version") {
+      return json({ version: PKG_VERSION, pid: process.pid });
     }
     if (req.method === "GET" && u.pathname === "/api/memories") {
       const q = u.searchParams.get("q")?.trim();
