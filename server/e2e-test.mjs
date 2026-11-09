@@ -1,14 +1,20 @@
 // lm-memory standalone E2E v2 — 全部用唯一标记 E2EUNIQ，避免与种子记忆碰撞
+// v0.10 修复：SDK client transport 的默认 env 白名单会滤掉 LM_MEMORY_DIR，
+// 导致本测试历史上一直落在 ~/.lm-memory 遗留库；现在显式指向 mkdtemp 临时库。
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lm-e2e-"));
 const client = new Client({ name: "lm-test", version: "0.2" });
 await client.connect(new StdioClientTransport({
   command: process.execPath,
   args: [path.join(__dirname, "memory-server.mjs")],
+  env: { ...process.env, LM_MEMORY_DIR: TMP, LM_EMBED: "0" },
 }));
 
 const call = async (name, args) => (await client.callTool({ name, arguments: args })).content[0].text;
@@ -34,4 +40,5 @@ console.log(`[recall已删] ${r3.startsWith("[]") ? "空 ✓" : r3}`);
 const fin = JSON.parse(await call("memory_list", { limit: 100 }));
 console.log(`[清理校验] 残留E2EUNIQ: ${fin.filter((x) => x.content.includes("E2EUNIQ")).length} 条, active 总数: ${fin.length}`);
 await client.close();
+fs.rmSync(TMP, { recursive: true, force: true });
 process.exit(0);

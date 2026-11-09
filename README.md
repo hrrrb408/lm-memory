@@ -8,7 +8,7 @@
 换一个会话、换一个 Agent（DSH / Claude Code / 任何 MCP 宿主），AI 就失忆了。
 lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记忆层——不只是记住，还会新陈代谢。
 
-## 功能总览（v0.9）
+## 功能总览（v0.10）
 
 | 能力 | 说明 |
 |---|---|
@@ -20,8 +20,34 @@ lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记
 | **日期锚定** | 相对时间（昨天/上周/明天）摄入时即换算绝对日期 |
 | **自动提炼** | 会话结束把用户发言蒸馏为 ≤4 条 preference/fact/procedure/todo |
 | **模型跟随** | 提炼/摘要默认跟随会话所用模型；可显式配置；无 key 优雅降级为纯检索模式 |
+| **变更热流（v0.10）** | 写操作追加 `changes.jsonl`（带内容摘要），capture 插件经 `agent/pre-step` 向**已开会话**实时注入记忆 delta——不再"旧会话碰壁才发现新记忆" |
 | **viewer** | 本地管理页：搜索、版本历史、用户画像、**休眠馆**（唤醒/置顶）、命中统计 |
 | **跨平台** | 路径全部动态解析（DSH_HOME/HOME），macOS / Windows / Linux 通用 |
+
+## 记忆变更热流与会话实时推送（v0.10）
+
+**病灶**：会话只在启动时读一次记忆快照（current.md 基线），之后记忆库的更新对它不可见——
+旧会话按过时流程干活，碰壁后才发现别处已改。
+
+**机制**（人脑式持续记忆流 + 场景触发的最小实现）：
+
+```
+memory_remember/correct/forget/pin/unpin/wake/sleep
+   └─ server announce() 追加 changes.jsonl（ts/op/id/kind/content≤200字/reason）
+        └─ capture 插件 agent/pre-step 瀑布（每个模型 step 前触发）
+             ├─ stat 一次：无增长零成本返回
+             ├─ per-session 字节 offset 增量读取（半行不消费、坏行跳过、文件轮转重置）
+             └─ 有新变更 → 往本 step 消息列表尾部注入一条 user 消息
+                  （source.kind=lm-memory-refresh，模型下一步立刻看到：
+                    「与当前任务相关的以最新内容为准；需要全文调 memory_recall」）
+```
+
+- **注入内容**：新增/修正/删除/置顶等变更摘要（单次最多 8 条，超出折叠计数）；episode 入库与 dormant 转换只折叠提示不展开
+- **幂等**：offset 随读随推，同一条变更对同一会话只注入一次；会话 dispose 清 offset
+- **基线语义**：会话首次 step 前的存量变更不推送（插件部署/会话启动前的记忆不算"新"）
+- **多会话隔离**：每个会话独立 offset，A 会话的推送不影响 B
+- **开关**：插件配置 `refresh: false` 一键关闭；viewer 管理页的写操作走 MCP 工具处理器，热流自动覆盖
+- **验证**：`node server/refresh-e2e.mjs` 全链路 22 断言（写流→读流→注入→幂等→隔离→半行→reject 透传）
 
 ## 架构
 

@@ -213,6 +213,20 @@ function audit(op, data = {}) {
   try { fs.appendFileSync(LOG_PATH, JSON.stringify(rec) + "\n"); } catch {}
   console.error(`[memory] ${op} ${JSON.stringify(data)}`);
 }
+// v0.10 记忆变更热流：区别于 log.jsonl 审计流（无内容），changes.jsonl 带内容摘要，
+// 供 dsh-lm-refresh 插件向「已开会话」实时推送记忆 delta（人脑式持续记忆流）。
+// 只追加；插件按字节 offset 增量消费；viewer 的写操作走 MCP 工具处理器，此处自动覆盖。
+const CHANGES_PATH = path.join(MEM_DIR, "changes.jsonl");
+const clip200 = (s) => String(s ?? "").slice(0, 200);
+function announce(op, data = {}) {
+  try { fs.appendFileSync(CHANGES_PATH, JSON.stringify({ ts: now(), op, ...data }) + "\n"); } catch {}
+}
+// sleep pass + 热流通知（三处调用共用：工具/启动/12h 巡检）
+function sleepPassAnnounced() {
+  const r = runSleepPass(db, audit);
+  if (r.decayed) { announce("dormant", { ids: r.ids }); regenerateCurrentMd(); }
+  return r;
+}
 function regenerateCurrentMd() {
   const rows = db.prepare("SELECT * FROM memories WHERE status='active' ORDER BY kind, updated_at DESC").all();
   const byKind = {};
@@ -246,6 +260,7 @@ function ingestPending() {
         const t = rec.capturedAt || now();
         db.prepare("INSERT INTO memories (kind, content, tags, source, status, created_at, updated_at) VALUES (?,?,?,'auto-capture','active',?,?)")
           .run(rec.kind || "episode", String(rec.content).slice(0, 2000), tag, t, t);
+        announce(rec.kind === "episode" ? "episode" : "remember", { id: Number(db.prepare("SELECT last_insert_rowid() id").get().id), kind: rec.kind || "episode", content: clip200(rec.content), tags: tag });
         inserted++;
       } catch (e) { console.error("[memory] pending line rejected:", e.message); }
     }
@@ -271,7 +286,7 @@ function checkSecret(content) {
 
 // ---------- server ----------
 const server = new McpServer(
-  { name: "lm-memory", version: "0.9.1" },
+  { name: "lm-memory", version: "0.10.0" },
   {
     capabilities: { tools: {} },
     instructions:
@@ -302,6 +317,7 @@ server.registerTool("memory_remember", {
   if (vecEn) db.prepare("UPDATE memories SET emb_en = ? WHERE id = ?").run(Buffer.from(vecEn.buffer, vecEn.byteOffset, vecEn.byteLength), id);
   regenerateCurrentMd();
   audit("remember", { id, kind, emb: vec ? 1 : 0 });
+  announce("remember", { id, kind, content: clip200(content), tags: tags.trim() });
   return ok(`OK: id=${id} v1 kind=${kind}`);
 });
 
@@ -492,6 +508,7 @@ server.registerTool("memory_correct", {
   if (cvecEn) db.prepare("UPDATE memories SET emb_en = ? WHERE id = ?").run(Buffer.from(cvecEn.buffer, cvecEn.byteOffset, cvecEn.byteLength), newId);
   regenerateCurrentMd();
   audit("correct", { old_id: id, new_id: Number(newId), version: row.version + 1, reason: reason.slice(0, 80) });
+  announce("correct", { old_id: id, new_id: Number(newId), version: row.version + 1, kind: row.kind, content: clip200(content), reason: reason.slice(0, 80) });
   return ok(`OK: 新版本 id=${Number(newId)} v${row.version + 1}（取代 id=${id}）`);
 });
 
@@ -500,11 +517,12 @@ server.registerTool("memory_forget", {
   description: "逻辑删除一条记忆（保留 tombstone 供审计，不再被召回）。",
   inputSchema: { id: z.number().int().positive(), reason: z.string().max(500).default("") },
 }, async ({ id, reason }) => {
-  const row = db.prepare("SELECT id FROM memories WHERE id=? AND status='active'").get(id);
+  const row = db.prepare("SELECT id, kind, content FROM memories WHERE id=? AND status='active'").get(id);
   if (!row) return ok(`ERROR: id=${id} 不存在或已删除。`);
   db.prepare("UPDATE memories SET status='deleted', updated_at=? WHERE id=?").run(now(), id);
   regenerateCurrentMd();
   audit("forget", { id, reason: reason.slice(0, 80) });
+  announce("forget", { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
   return ok(`OK: id=${id} 已删除（逻辑），不再出现在召回与 current.md。`);
 });
 
@@ -527,13 +545,14 @@ server.registerTool("memory_pin", {
     reason: z.string().max(500).default(""),
   },
 }, async ({ id, action, reason }) => {
-  const row = db.prepare("SELECT id, status, pinned FROM memories WHERE id=?").get(id);
+  const row = db.prepare("SELECT id, status, pinned, kind, content FROM memories WHERE id=?").get(id);
   if (!row) return ok(`ERROR: id=${id} 不存在。`);
   if (action === "wake") {
     if (row.status !== "dormant") return ok(`SKIP: id=${id} 状态为 ${row.status}，无需唤醒。`);
     db.prepare("UPDATE memories SET status='active', updated_at=? WHERE id=?").run(now(), id);
     regenerateCurrentMd();
     audit("wake", { id, reason: reason.slice(0, 80) });
+    announce("wake", { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
     return ok(`OK: id=${id} 已唤醒，重新参与召回并重置衰减时钟。`);
   }
   const isPin = action === "pin";
@@ -544,6 +563,7 @@ server.registerTool("memory_pin", {
   else db.prepare("UPDATE memories SET pinned=? WHERE id=?").run(isPin ? 1 : 0, id); // pin/unpin 是管理操作，不重置衰减时钟
   regenerateCurrentMd();
   audit(action, { id, reason: reason.slice(0, 80) });
+  announce(action, { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
   return ok(`OK: id=${id} ${isPin ? "已置顶（永不休眠" + (row.status === "dormant" ? "，并唤醒" : "") + "）" : "已取消置顶"}。`);
 });
 
@@ -552,16 +572,15 @@ server.registerTool("memory_sleep", {
   description: "手动执行一轮 sleep-time 整理：长期未被召回且未置顶的记忆转入休眠（可唤醒、可审计）。",
   inputSchema: {},
 }, async () => {
-  const r = runSleepPass(db, audit);
-  if (r.decayed) regenerateCurrentMd();
+  const r = sleepPassAnnounced();
   return ok(`OK: 检查 ${r.checked} 条，休眠 ${r.decayed} 条${r.ids.length ? `（ids: ${r.ids.join(",")}）` : ""}。`);
 });
 
 const transport = new StdioServerTransport();
 ingestPending();
 if (EMB_ENABLED) { void getEmbedder().then(() => getEmbedderEn()); void backfillEmbeddings(); } // 启动即预热双模型 + 后台回填（空库时 backfill 无活，预热让首次写入免付冷启动）
-try { const sr = runSleepPass(db, audit); if (sr.decayed) regenerateCurrentMd(); } catch (e) { console.error("[memory] startup sleep pass:", e.message); } // v0.7 启动整理
-setInterval(() => { try { const sr = runSleepPass(db, audit); if (sr.decayed) regenerateCurrentMd(); void backfillEmbeddings(); } catch {} }, 12 * 3600 * 1000).unref(); // 每 12h 巡检 + 补嵌（helper 直写的行没有向量）
+try { const sr = sleepPassAnnounced(); } catch (e) { console.error("[memory] startup sleep pass:", e.message); } // v0.7 启动整理
+setInterval(() => { try { sleepPassAnnounced(); void backfillEmbeddings(); } catch {} }, 12 * 3600 * 1000).unref(); // 每 12h 巡检 + 补嵌（helper 直写的行没有向量）
 void (async () => { // 孤儿提炼任务回收：宿主退出时派发的任务若未能执行，这里补跑（>2 分钟旧的，最多 3 个）
   try {
     const jobsDir = path.join(MEM_DIR, "extraction-jobs");

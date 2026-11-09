@@ -5,6 +5,7 @@
 // 纪律：任何异常都不得抛出宿主进程；只写 stderr；幂等（同一 session 只采一次）。
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -142,6 +143,90 @@ function capture(session, config) {
   }
 }
 
+// ===== lm-refresh（v0.10）：记忆变更实时推送给「已开会话」 =====
+// 病灶：会话只在启动时读一次记忆快照（current.md），之后记忆库的更新对它不可见，
+// 旧会话要碰壁才发现新流程。解法：agent/pre-step 瀑布管道里检查 changes.jsonl
+// （server 侧 announce() 追加的变更热流），有新记忆就往本 step 的消息列表尾部
+// 注入一条 user 消息（source.kind=lm-memory-refresh，同 time-context 形状），
+// 模型在下一步立刻看到——持续记忆流 + 场景触发（前瞻记忆）的最小实现。
+// 纪律：异常静默不抛宿主；per-session 字节 offset 幂等；无变更零成本（一次 stat）。
+const changesPath = () => path.join(MEM_DIR, "changes.jsonl");
+const refreshOffsets = new Map(); // sessionId -> 已消费字节 offset（首次 pre-step 建基线=当时文件尾）
+const INJECT_OPS = new Set(["remember", "correct", "forget", "pin", "unpin", "wake"]);
+const OP_LABEL = { remember: "新增", correct: "修正", forget: "删除", pin: "置顶", unpin: "取消置顶", wake: "唤醒" };
+const KIND_LABEL = { preference: "偏好", fact: "事实", procedure: "经验", todo: "待办", episode: "会话" };
+
+function readNewChanges(offset) {
+  const file = changesPath();
+  let st;
+  try { st = fs.statSync(file); } catch { return { changes: [], newOffset: offset }; }
+  let from = offset;
+  if (st.size < from) from = 0; // 文件被清理/轮转 → 重头读
+  if (st.size <= from) return { changes: [], newOffset: from };
+  const buf = Buffer.alloc(st.size - from);
+  const fd = fs.openSync(file, "r");
+  try { fs.readSync(fd, buf, 0, buf.length, from); } finally { fs.closeSync(fd); }
+  const text = buf.toString("utf8");
+  const changes = [];
+  let consumed = 0;
+  const lines = text.split("\n");
+  const complete = lines.slice(0, -1); // 末行可能半截（写方正在追加），不消费
+  for (const line of complete) {
+    consumed += Buffer.byteLength(line, "utf8") + 1;
+    if (!line.trim()) continue;
+    try { changes.push(JSON.parse(line)); } catch {}
+  }
+  return { changes, newOffset: from + consumed };
+}
+
+function buildDeltaText(changes) {
+  const injectable = changes.filter((c) => INJECT_OPS.has(c.op));
+  const dormantIds = changes.flatMap((c) => (c.op === "dormant" && Array.isArray(c.ids) ? c.ids : []));
+  if (!injectable.length && !dormantIds.length) return null;
+  const hhmm = (ts) => { try { const d = new Date(ts); return isNaN(d) ? String(ts).slice(11, 16) : d.toTimeString().slice(0, 5); } catch { return ts; } };
+  const clip = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + "…" : s; };
+  const lines = injectable.slice(0, 8).map((c) => {
+    const idpart = c.new_id ?? c.id;
+    return `- [${hhmm(c.ts)} ${OP_LABEL[c.op] ?? c.op}]${c.kind ? `[${KIND_LABEL[c.kind] ?? c.kind}] ` : " "}${clip(c.content, 160)}${idpart != null ? `（id=${idpart}${c.version ? ` v${c.version}` : ""}）` : ""}${c.reason ? `｜原因：${clip(c.reason, 60)}` : ""}`;
+  });
+  let out = "【记忆库实时更新】本会话运行期间，记忆库写入了以下变更（晚于本会话启动时加载的记忆快照）：";
+  if (lines.length) out += "\n" + lines.join("\n");
+  if (injectable.length > 8) out += `\n- …另有 ${injectable.length - 8} 条变更（memory_list 可查全量）`;
+  if (dormantIds.length) out += `\n- 另有 ${dormantIds.length} 条长期未召回的记忆转入休眠（不再参与召回）。`;
+  out += "\n与当前任务相关的（尤其流程/坑/铁律类）一律以最新内容为准，需要全文调 memory_recall；标记「删除」的条目不要再引用；无关则忽略本条。";
+  return out;
+}
+
+function refreshHook(config) {
+  return async (payload, next) => {
+    const decision = await next();
+    try {
+      if (!decision || decision.kind === "reject" || payload?.signal?.aborted) return decision;
+      if (config?.refresh === false) return decision;
+      const sid = payload?.agent?.session?.id ?? payload?.agent?.id;
+      if (!sid) return decision;
+      let st;
+      try { st = fs.statSync(changesPath()); } catch { return decision; } // 无热流文件=尚无变更
+      let offset = refreshOffsets.get(sid);
+      if (offset === undefined) { refreshOffsets.set(sid, st.size); return decision; } // 本会话基线：此前的不算"新"
+      const { changes, newOffset } = readNewChanges(offset);
+      refreshOffsets.set(sid, newOffset); // 无论是否注入都推进，防重复注入死循环
+      const text = changes.length ? buildDeltaText(changes) : null;
+      if (!text) return decision;
+      log(`refresh push to session ${String(sid).slice(0, 8)}…: ${changes.length} changes`);
+      return {
+        ...decision,
+        messages: [...decision.messages, {
+          role: "user",
+          id: randomUUID(),
+          content: [{ type: "text", text }],
+          source: { kind: "lm-memory-refresh", form: "snapshot", sections: [{ name: "lm-memory-refresh", text }] },
+        }],
+      };
+    } catch (e) { log(`refresh error: ${e?.message ?? e}`); return decision; }
+  };
+}
+
 export default function apply(ctx, config) {
   try {
     if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
@@ -185,8 +270,11 @@ export default function apply(ctx, config) {
     });
     ctx.on("session/disposed", (session) => {
       log(`event: session/disposed ${session?.id}`);
+      try { refreshOffsets.delete(session?.id); } catch {}
       capture(session, config);
     });
+    // lm-refresh：每个 step 前检查记忆变更热流，有新记忆就注入 delta（config.refresh=false 关闭）
+    ctx.on("agent/pre-step", refreshHook(config));
     // headless/一次性进程：进程退出时同步落盘（桌面常驻进程下由上面的实时事件覆盖）
     if (!globalThis.__lmCaptureExitHooked) {
       globalThis.__lmCaptureExitHooked = true;
