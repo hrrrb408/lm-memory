@@ -129,11 +129,12 @@ nav a.on{background:var(--ink);color:#fff}
 button{font:inherit}
 </style></head><body>
 <header><h1>记忆库</h1><div class="sub" id="sub"></div><div class="stats" id="stats"></div></header>
-<nav><a id="tabList" class="on" onclick="showView('list')">记忆库</a><a id="tabProfile" onclick="showView('profile')">画像</a><a id="tabDormant" onclick="showView('dormant')">休眠馆</a></nav>
+<nav><a id="tabList" class="on" onclick="showView('list')">记忆库</a><a id="tabProfile" onclick="showView('profile')">画像</a><a id="tabDormant" onclick="showView('dormant')">休眠馆</a><a id="tabGraph" onclick="showView('graph')">图谱</a></nav>
 <div class="bar" id="searchbar"><input id="q" type="search" placeholder="搜索记忆（走完整检索管线：词法 + 中文语义）…"></div>
 <main id="list"></main>
 <div id="profile"></div>
 <div id="dormant"></div>
+<div id="graph" style="max-width:860px;margin:0 auto;display:none"></div>
 <div class="empty" id="empty" style="display:none">没有匹配的记忆</div>
 <footer>lm-memory viewer · 数据在 ${MEM_DIR} · 操作走 MCP 同一套业务逻辑</footer>
 <script>
@@ -208,13 +209,99 @@ window.loadDormant = async () => {
 };
 $("#stats").addEventListener("click", (e) => { const k = e.target.closest(".chip")?.dataset.k; if (k === undefined) return; filter = k || null; load(); });
 window.showView = (v) => {
-  for (const t of ["List", "Profile", "Dormant"]) $("#tab" + t).classList.toggle("on", v === t.toLowerCase());
+  for (const t of ["List", "Profile", "Dormant", "Graph"]) $("#tab" + t).classList.toggle("on", v === t.toLowerCase());
   $("#searchbar").style.display = v === "list" ? "flex" : "none";
   $("#list").style.display = v === "list" ? "flex" : "none";
   $("#profile").style.display = v === "profile" ? "flex" : "none";
   $("#dormant").style.display = v === "dormant" ? "flex" : "none";
+  $("#graph").style.display = v === "graph" ? "block" : "none";
   if (v === "profile") loadProfile();
   if (v === "dormant") loadDormant();
+  if (v === "graph") loadGraph();
+};
+// v0.12 图谱页：零依赖 SVG 力导图（预跑 300 步降温出稳定布局，节点可拖拽整理）
+const REL_COLOR = { similar: "#7c3aed", co_tag: "#0f766e", ref: "#b45309" };
+window.loadGraph = async () => {
+  const d = await (await fetch("/api/graph")).json();
+  const el = $("#graph");
+  const stats = d.nodes.length + " 节点 · " + d.links.length + " 边（" +
+    ["similar", "co_tag", "ref"].map((r) => '<span style="color:' + (REL_COLOR[r] || "#666") + '">'+ r + ' ' + (d.byRel[r] || 0) + "</span>").join(" · ") + "）· 悬停看内容，节点可拖拽";
+  el.innerHTML = '<div class="meta" style="margin-bottom:10px">' + stats + "</div>";
+  const W = Math.max(el.clientWidth - 2, 600), H = 620;
+  const nodes = d.nodes.map((n, i) => ({ ...n, x: 0, y: 0, deg: 0 }));
+  const R0 = Math.min(W, H) / 2 - 40;
+  nodes.forEach((n, i) => { const a = (2 * Math.PI * i) / nodes.length; n.x = W / 2 + R0 * Math.cos(a); n.y = H / 2 + R0 * Math.sin(a); });
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const links = d.links.map((l) => ({ ...l, s: byId.get(l.source), t: byId.get(l.target) })).filter((l) => l.s && l.t);
+  for (const l of links) { l.s.deg++; l.t.deg++; }
+  for (let step = 0; step < 300; step++) {
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      let dx = a.x - b.x, dy = a.y - b.y;
+      const d2 = dx * dx + dy * dy + 0.01;
+      if (d2 > 40000) continue;
+      const f = 900 / d2, dist = Math.sqrt(d2);
+      dx /= dist; dy /= dist;
+      a.x += dx * f; a.y += dy * f; b.x -= dx * f; b.y -= dy * f;
+    }
+    for (const l of links) {
+      let dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+      const f = (dist - 70) * 0.02;
+      dx /= dist; dy /= dist;
+      l.s.x += dx * f; l.s.y += dy * f; l.t.x -= dx * f; l.t.y -= dy * f;
+    }
+    for (const n of nodes) {
+      n.x += (W / 2 - n.x) * 0.01; n.y += (H / 2 - n.y) * 0.01;
+      n.x = Math.max(16, Math.min(W - 16, n.x)); n.y = Math.max(16, Math.min(H - 16, n.y));
+    }
+  }
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("width", W); svg.setAttribute("height", H);
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.style.cssText = "background:var(--card);border:1px solid var(--line);border-radius:14px;touch-action:none";
+  const lineEls = links.map((l) => {
+    const ln = document.createElementNS(NS, "line");
+    ln.setAttribute("x1", l.s.x); ln.setAttribute("y1", l.s.y);
+    ln.setAttribute("x2", l.t.x); ln.setAttribute("y2", l.t.y);
+    ln.setAttribute("stroke", REL_COLOR[l.rel] || "#999");
+    ln.setAttribute("stroke-width", Math.min(0.6 + (l.weight || 1) * 0.7, 4));
+    ln.setAttribute("stroke-opacity", Math.min(0.2 + (l.weight || 1) * 0.15, 0.8));
+    svg.appendChild(ln);
+    return { l, el: ln };
+  });
+  const drag = { n: null };
+  const nodeEls = nodes.map((n) => {
+    const g = document.createElementNS(NS, "g");
+    const cEl = document.createElementNS(NS, "circle");
+    cEl.setAttribute("cx", n.x); cEl.setAttribute("cy", n.y);
+    cEl.setAttribute("r", Math.min(3 + n.deg * 0.9, 11));
+    cEl.setAttribute("fill", KCOL[n.kind] || "#666");
+    cEl.setAttribute("fill-opacity", n.pinned ? 1 : 0.85);
+    if (n.pinned) { cEl.setAttribute("stroke", "#1c1917"); cEl.setAttribute("stroke-width", "1.5"); }
+    cEl.style.cursor = "grab";
+    const tip = document.createElementNS(NS, "title");
+    tip.textContent = "#" + n.id + " [" + (K[n.kind]?.[0] || n.kind) + "] " + n.tip;
+    g.appendChild(cEl); g.appendChild(tip); svg.appendChild(g);
+    cEl.addEventListener("mousedown", (ev) => { drag.n = n; ev.preventDefault(); });
+    return { n, cEl };
+  });
+  svg.addEventListener("mousemove", (ev) => {
+    if (!drag.n) return;
+    const rect = svg.getBoundingClientRect();
+    drag.n.x = Math.max(16, Math.min(W - 16, ev.clientX - rect.left));
+    drag.n.y = Math.max(16, Math.min(H - 16, ev.clientY - rect.top));
+    const pair = nodeEls.find((x) => x.n === drag.n);
+    pair.cEl.setAttribute("cx", drag.n.x); pair.cEl.setAttribute("cy", drag.n.y);
+    for (const { l, el: ln } of lineEls) {
+      if (l.s === drag.n) { ln.setAttribute("x1", drag.n.x); ln.setAttribute("y1", drag.n.y); }
+      if (l.t === drag.n) { ln.setAttribute("x2", drag.n.x); ln.setAttribute("y2", drag.n.y); }
+    }
+  });
+  svg.addEventListener("mouseup", () => { drag.n = null; });
+  svg.addEventListener("mouseleave", () => { drag.n = null; });
+  el.appendChild(svg);
 };
 const KCOL = { preference: "#c8402e", fact: "#2563eb", todo: "#b45309", procedure: "#0f766e", episode: "#71717a" };
 const fmt = (t) => esc(t).split("\\n").join("<br>");
@@ -281,6 +368,15 @@ http.createServer(async (req, res) => {
       for (const m of all) counts[m.kind] = (counts[m.kind] ?? 0) + 1;
       for (const m of items) m.date = m.date ?? m.updated_at;
       return json({ items, total: all.length, counts });
+    }
+    if (req.method === "GET" && u.pathname === "/api/graph") { // v0.12 图谱页数据：active 节点 + edges 边
+      const d = ro();
+      const nodes = d.prepare("SELECT id, kind, content, pinned FROM memories WHERE status='active'").all()
+        .map((m) => ({ id: m.id, kind: m.kind, pinned: !!m.pinned, label: String(m.content).replace(/\s+/g, " ").trim().slice(0, 18), tip: String(m.content).replace(/\s+/g, " ").trim().slice(0, 90) }));
+      const links = d.prepare("SELECT src AS source, dst AS target, rel, weight FROM edges").all();
+      const byRel = {};
+      for (const l of links) byRel[l.rel] = (byRel[l.rel] ?? 0) + 1;
+      return json({ nodes, links, byRel });
     }
     if (req.method === "GET" && u.pathname === "/api/dormant") {
       const rows = ro().prepare("SELECT id, version, kind, content, tags, updated_at, hit_count, pinned FROM memories WHERE status='dormant' ORDER BY updated_at DESC LIMIT 200").all();

@@ -8,7 +8,7 @@
 换一个会话、换一个 Agent（DSH / Claude Code / 任何 MCP 宿主），AI 就失忆了。
 lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记忆层——不只是记住，还会新陈代谢。
 
-## 功能总览（v0.11）
+## 功能总览（v0.12）
 
 | 能力 | 说明 |
 |---|---|
@@ -23,6 +23,7 @@ lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记
 | **变更热流（v0.10）** | 写操作追加 `changes.jsonl`（带内容摘要），capture 插件经 `agent/pre-step` 向**已开会话**实时注入记忆 delta——不再"旧会话碰壁才发现新记忆" |
 | **索引注入层（v0.11）** | `current.md` 改索引形态：置顶条目全文 + 其余每条一行指针（#id 保留可定位），细节靠 `memory_recall`——注入层体积 90KB→约 20KB，对齐 Anthropic《The components of agent memory》"注入层必须小" |
 | **dream 去重扫描（v0.11）** | `dream.mjs` 纯函数 + `scripts/dream-dryrun.mjs` 只读 CLI：嵌入余弦扫疑似重复对（跨 kind），人审后合并——dreaming 的库内第一步（对照 transcript 校对属后续版本） |
+| **记忆图谱（v0.12）** | `edges` 边表（similar/co_tag/ref 三类确定性边，高频 tag 防 supernode）+ `recall expand:true` 一跳关联扩展 + viewer 图谱页（零依赖 SVG 力导）。思路对齐 Mem0 native Graph Memory——不做类型化关系，纯共现/相似/引用推断 |
 | **viewer** | 本地管理页：搜索、版本历史、用户画像、**休眠馆**（唤醒/置顶）、命中统计 |
 | **跨平台** | 路径全部动态解析（DSH_HOME/HOME），macOS / Windows / Linux 通用 |
 
@@ -68,6 +69,22 @@ Claude Code 基线 200 行/25KB 索引）；dreaming 的价值在拿原始记录
 - **验证**：`current-md-e2e.mjs` 12 断言（截断/折叠/pinned 全文/episode 排除/25KB 线）；
   `dream-e2e.mjs` 8 断言（高相似抓取/正交不误报/deleted 排除/阈值敏感/跨 kind）；
   既有 sleep 16 + refresh 22 + e2e-test 全量回归通过。
+
+## 记忆图谱（v0.12）
+
+**对齐**：Mem0 Graph Memory（2026 native 版）的核心洞察——图谱的价值在"提到同一实体的记忆互相能找到"，
+类型化关系边（"A 管理 B"）连 Mem0 都已放弃（LLM 抽边是幻觉源）。本版只做三类**确定性信号**的边：
+
+| 边 | 信号 | 权重 |
+|---|---|---|
+| `similar` | 嵌入余弦 ≥0.82（阈值低于 dream 的 0.88——这里要"相关"，不要"重复"） | cos 值 |
+| `co_tag` | 低频标签共现（df 2..20 才是信号；`lifeos`×97 这种背景噪声直接出局） | 共享 tag 数 |
+| `ref` | 正文显式引用同库条目（`#272` / `记忆 275` / `id=258`；「条目N」式序号会误匹配，graph-e2e 实抓后剔除） | 1 |
+
+- **维护时机**：remember/correct/forget/pin/sleep 之后全量重建（数千条内毫秒级，先正确后增量）；每节点 maxDeg=32 防 supernode
+- **检索接入**：`memory_recall` 新增 `expand: true`——返回 `{hits, related}`，related 为命中条目的一跳邻居（带 `rel(w=权重) via #锚点` 建边依据）；默认 false 不破坏原数组格式
+- **viewer 图谱页**：`/api/graph` + 零依赖 SVG 力导（预跑 300 步降温出稳定布局，节点色=kind、半径=度数、边色=rel、悬停看全文、可拖拽整理）
+- **验证**：`graph-e2e.mjs` 14 断言（三类边建对/高频 tag 防 supernode/写后自动重建/expand 格式/forget 后边消失/默认格式兼容）
 
 ## 架构
 

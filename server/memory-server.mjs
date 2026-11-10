@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { rebuildEdges, neighbors } from "./graph.mjs";
 import { runSleepPass } from "./sleep.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
@@ -54,6 +55,16 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mem_kind ON memories(kind) WHERE status='active';
 `);
+// v0.12 图谱边表（graph.mjs rebuildEdges 全量重建维护；只存 active-active 边）
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS edges (
+    src INTEGER NOT NULL, dst INTEGER NOT NULL,
+    rel TEXT NOT NULL CHECK (rel IN ('similar','co_tag','ref')),
+    weight REAL NOT NULL DEFAULT 1,
+    PRIMARY KEY (src, dst, rel))`);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst)");
+} catch (e) { console.error("[memory] edges table error:", e.message); }
 try {
   const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='memories'").get()?.sql ?? "";
   if (tableSql && !tableSql.includes("'todo'")) {
@@ -224,8 +235,16 @@ function announce(op, data = {}) {
 // sleep pass + 热流通知（三处调用共用：工具/启动/12h 巡检）
 function sleepPassAnnounced() {
   const r = runSleepPass(db, audit);
-  if (r.decayed) { announce("dormant", { ids: r.ids }); regenerateCurrentMd(); }
+  if (r.decayed) { announce("dormant", { ids: r.ids }); regenerateCurrentMd(); rebuildEdgesSafe(); }
   return r;
+}
+// v0.12 衍生数据统一刷新：注入层索引 + 图谱边表（规模数千条内全量重建为毫秒级，先正确后增量）
+function rebuildEdgesSafe() {
+  try {
+    const g = rebuildEdges(db);
+    audit("rebuild_edges", { nodes: g.nodes, edges: g.edges, byRel: g.byRel });
+    return g;
+  } catch (e) { console.error("[memory] rebuild_edges error:", e.message); return null; }
 }
 // v0.11 索引形态（Anthropic《The components of agent memory》依据：注入层必须小，
 // 加载不等于遵循；Claude Code 基线为 200行/25KB 索引）。置顶条目全文，
@@ -300,7 +319,7 @@ function checkSecret(content) {
 
 // ---------- server ----------
 const server = new McpServer(
-  { name: "lm-memory", version: "0.11.0" },
+  { name: "lm-memory", version: "0.12.0" },
   {
     capabilities: { tools: {} },
     instructions:
@@ -329,7 +348,7 @@ server.registerTool("memory_remember", {
   if (vec) db.prepare("UPDATE memories SET emb = ? WHERE id = ?").run(Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength), id);
   const vecEn = await embedEn(content.trim());
   if (vecEn) db.prepare("UPDATE memories SET emb_en = ? WHERE id = ?").run(Buffer.from(vecEn.buffer, vecEn.byteOffset, vecEn.byteLength), id);
-  regenerateCurrentMd();
+  regenerateCurrentMd(); rebuildEdgesSafe();
   audit("remember", { id, kind, emb: vec ? 1 : 0 });
   announce("remember", { id, kind, content: clip200(content), tags: tags.trim() });
   return ok(`OK: id=${id} v1 kind=${kind}`);
@@ -342,8 +361,9 @@ server.registerTool("memory_recall", {
     query: z.string().min(1).max(500).describe("自然语言查询（中文可用）"),
     limit: z.number().int().min(1).max(20).default(5),
     kind: z.enum(KINDS).optional(),
+    expand: z.boolean().default(false).describe("图谱扩展：附带命中条目的一跳关联记忆（co_tag/similar/ref 边），实体中心问题用"),
   },
-}, async ({ query, limit, kind }) => {
+}, async ({ query, limit, kind, expand }) => {
   ingestPending(); // 先消化自动采集队列，保证刚结束的会话可被检索
   const words = query.replace(/["'^*]/g, " ").trim().split(/\s+/).filter(Boolean);
   const kindParams = kind ? [kind] : [];
@@ -485,7 +505,16 @@ server.registerTool("memory_recall", {
   }
   audit("recall", { query: query.slice(0, 60), hits: rows.length, ids: rows.map((r) => r.id) });
   if (!rows.length) return ok("[]（无相关记忆。不确定就不编造。）");
-  return ok(JSON.stringify(rows.map((r) => ({ id: r.id, v: r.version, kind: r.kind, date: r.updated_at.slice(0, 10), content: r.content, tags: r.tags })), null, 1));
+  const hits = rows.map((r) => ({ id: r.id, v: r.version, kind: r.kind, date: r.updated_at.slice(0, 10), content: r.content, tags: r.tags }));
+  if (expand) { // v0.12 图谱一跳扩展：related 独立于 hits，带建边依据（rel/权重/锚点）
+    const rel = neighbors(db, rows.map((r) => r.id), { limit: 6, exclude: new Set(rows.map((r) => r.id)) });
+    const related = rel.map((n) => {
+      const m = db.prepare("SELECT id, version, kind, updated_at, content, tags FROM memories WHERE id=? AND status='active'").get(n.id);
+      return m ? { id: m.id, v: m.version, kind: m.kind, date: m.updated_at.slice(0, 10), content: m.content, tags: m.tags, graph: `${n.rel}(w=${n.weight}) via #${n.via}` } : null;
+    }).filter(Boolean);
+    return ok(JSON.stringify({ hits, related }, null, 1));
+  }
+  return ok(JSON.stringify(hits, null, 1));
 });
 
 server.registerTool("memory_correct", {
@@ -520,7 +549,7 @@ server.registerTool("memory_correct", {
   if (cvec) db.prepare("UPDATE memories SET emb = ? WHERE id = ?").run(Buffer.from(cvec.buffer, cvec.byteOffset, cvec.byteLength), newId);
   const cvecEn = await embedEn(content.trim());
   if (cvecEn) db.prepare("UPDATE memories SET emb_en = ? WHERE id = ?").run(Buffer.from(cvecEn.buffer, cvecEn.byteOffset, cvecEn.byteLength), newId);
-  regenerateCurrentMd();
+  regenerateCurrentMd(); rebuildEdgesSafe();
   audit("correct", { old_id: id, new_id: Number(newId), version: row.version + 1, reason: reason.slice(0, 80) });
   announce("correct", { old_id: id, new_id: Number(newId), version: row.version + 1, kind: row.kind, content: clip200(content), reason: reason.slice(0, 80) });
   return ok(`OK: 新版本 id=${Number(newId)} v${row.version + 1}（取代 id=${id}）`);
@@ -534,7 +563,7 @@ server.registerTool("memory_forget", {
   const row = db.prepare("SELECT id, kind, content FROM memories WHERE id=? AND status='active'").get(id);
   if (!row) return ok(`ERROR: id=${id} 不存在或已删除。`);
   db.prepare("UPDATE memories SET status='deleted', updated_at=? WHERE id=?").run(now(), id);
-  regenerateCurrentMd();
+  regenerateCurrentMd(); rebuildEdgesSafe();
   audit("forget", { id, reason: reason.slice(0, 80) });
   announce("forget", { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
   return ok(`OK: id=${id} 已删除（逻辑），不再出现在召回与 current.md。`);
@@ -564,7 +593,7 @@ server.registerTool("memory_pin", {
   if (action === "wake") {
     if (row.status !== "dormant") return ok(`SKIP: id=${id} 状态为 ${row.status}，无需唤醒。`);
     db.prepare("UPDATE memories SET status='active', updated_at=? WHERE id=?").run(now(), id);
-    regenerateCurrentMd();
+    regenerateCurrentMd(); rebuildEdgesSafe();
     audit("wake", { id, reason: reason.slice(0, 80) });
     announce("wake", { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
     return ok(`OK: id=${id} 已唤醒，重新参与召回并重置衰减时钟。`);
@@ -575,7 +604,7 @@ server.registerTool("memory_pin", {
   const wakeByPin = isPin && row.status === "dormant"; // 置顶休眠记忆 = 同时唤醒（重置时钟）
   if (wakeByPin) db.prepare("UPDATE memories SET pinned=1, status='active', updated_at=? WHERE id=?").run(now(), id);
   else db.prepare("UPDATE memories SET pinned=? WHERE id=?").run(isPin ? 1 : 0, id); // pin/unpin 是管理操作，不重置衰减时钟
-  regenerateCurrentMd();
+  regenerateCurrentMd(); rebuildEdgesSafe();
   audit(action, { id, reason: reason.slice(0, 80) });
   announce(action, { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
   return ok(`OK: id=${id} ${isPin ? "已置顶（永不休眠" + (row.status === "dormant" ? "，并唤醒" : "") + "）" : "已取消置顶"}。`);
