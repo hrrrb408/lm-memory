@@ -230,13 +230,17 @@ const NODE_COLOR = { preference: "#c26d5c", fact: "#5b7fa6", procedure: "#6f9c8a
 window.loadGraph = async () => {
   const d = await (await fetch("/api/graph")).json();
   const el = $("#graph");
-  const stats = d.nodes.length + " 节点 · " + d.links.length + " 边（" +
-    ["similar", "co_tag", "ref"].map((r) => '<span style="color:' + (REL_COLOR[r] || "#666") + '">'+ r + ' ' + (d.byRel[r] || 0) + "</span>").join(" · ") + "）· 悬停聚焦一跳，节点可拖拽";
-  const legend = Object.entries(NODE_COLOR).map(([k, c]) =>
-    '<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)"><i style="width:8px;height:8px;border-radius:50%;background:' + c + '"></i>' + (K[k]?.[0] || k) + "</span>").join("");
-  el.innerHTML = '<div class="meta" style="margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;justify-content:space-between">'
-    + '<span>' + stats + '</span><span style="display:inline-flex;gap:12px">' + legend + "</span></div>";
-  const W = Math.max(el.clientWidth - 2, 600), H = 680;
+  const statsTxt = d.nodes.length + " 节点 · " + d.links.length + " 边";
+  el.innerHTML = '<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
+    + '<input id="gq" type="search" placeholder="过滤节点（命中节点点亮一跳，其余退场）…" style="flex:1;min-width:180px;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:7px 12px;font:inherit;font-size:13px;outline:none">'
+    + '<span id="grep" style="display:inline-flex;gap:8px">' + ["similar", "co_tag", "ref"].map((r) =>
+        '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer"><input type="checkbox" checked data-rel="' + r + '" style="accent-color:' + REL_COLOR[r] + '">' + r + "</label>").join("") + "</span>"
+    + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)">孤儿≥<select id="gmin" style="font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:3px 6px;background:var(--card)"><option>0</option><option>1</option><option>2</option><option>3</option></select>条连接</label>'
+    + '<button id="greset" style="border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer;color:var(--muted)">复位视图</button></div>'
+    + '<div id="gcanvas"></div>'
+    + '<div id="gbar" style="margin-top:8px;display:none"><span class="meta" id="gtip"></span></div>';
+  const wrap = $("#gcanvas");
+  const W = Math.max(wrap.clientWidth - 2 || 858, 600), H = 680;
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("width", W); svg.setAttribute("height", H);
@@ -297,7 +301,7 @@ window.loadGraph = async () => {
   const hubs = [...nodes].sort((a, b) => b.deg - a.deg).slice(0, 6);
   const hubSet = new Set(hubs);
   const hubSide = new Map(hubs.map((n, i) => [n.id, i % 2 === 0 ? -1 : 1]));
-  const drag = { n: null };
+  // dnd/pan 手势状态在 nodeEls 构建后的交互段统一声明（闭包引用，运行时已初始化）
   const nodeEls = nodes.map((n) => {
     const g = document.createElementNS(NS, "g");
     const r = Math.min(3.5 + Math.sqrt(n.deg) * 1.9, 13);
@@ -332,7 +336,10 @@ window.loadGraph = async () => {
         if (l.t === n) { ln.setAttribute("x2", x); ln.setAttribute("y2", y); }
       }
     };
-    cEl.addEventListener("mousedown", (ev) => { drag.n = { n, setPos }; ev.preventDefault(); });
+    cEl.addEventListener("mousedown", (ev) => { dnd.n = { n, setPos }; dnd.sx = ev.clientX; dnd.sy = ev.clientY; dnd.moved = false; ev.preventDefault(); ev.stopPropagation(); });
+    cEl.addEventListener("click", () => { // 点击（非拖拽）→ 局部图谱模式切换
+      if (dnd.n && !dnd.moved) { st.focusId = st.focusId === n.id ? null : n.id; applyState(); }
+    });
     // hover 聚焦：点亮一跳，其余退场
     const focus = (on) => {
       const near = new Set([n.id]);
@@ -349,18 +356,106 @@ window.loadGraph = async () => {
         ln.setAttribute("stroke-opacity", on ? (touch ? 0.8 : 0.03) : base);
       }
     };
-    cEl.addEventListener("mouseenter", () => focus(true));
-    cEl.addEventListener("mouseleave", () => focus(false));
+    cEl.addEventListener("mouseenter", () => { if (st.focusId == null && !st.q) focus(true); });
+    cEl.addEventListener("mouseleave", () => { if (st.focusId == null && !st.q) focus(false); else applyState(); });
     return { n, cEl, setPos };
   });
-  svg.addEventListener("mousemove", (ev) => {
-    if (!drag.n) return;
-    const rect = svg.getBoundingClientRect();
-    drag.n.setPos(Math.max(16, Math.min(W - 16, ev.clientX - rect.left)), Math.max(16, Math.min(H - 16, ev.clientY - rect.top)));
+  // ---- v0.13 交互状态与视图（Obsidian 图谱三件套：缩放平移 / 搜索过滤 / 局部图谱）----
+  const view = { k: 1, tx: 0, ty: 0 };
+  const applyView = () => svg.setAttribute("viewBox", view.tx + " " + view.ty + " " + (W / view.k) + " " + (H / view.k));
+  applyView();
+  const toSvg = (cx, cy) => {
+    const r = svg.getBoundingClientRect();
+    return [view.tx + (cx - r.left) * (W / view.k) / r.width, view.ty + (cy - r.top) * (H / view.k) / r.height];
+  };
+  const st = { minDeg: 0, relOn: { similar: true, co_tag: true, ref: true }, q: "", focusId: null };
+  const nById = new Map(nodeEls.map((x) => [x.n.id, x.n]));
+  const adj = new Map();
+  for (const l of links) {
+    if (!adj.has(l.s.id)) adj.set(l.s.id, new Set());
+    if (!adj.has(l.t.id)) adj.set(l.t.id, new Set());
+    adj.get(l.s.id).add(l.t.id); adj.get(l.t.id).add(l.s.id);
+  }
+  const applyState = () => {
+    const q = st.q.trim().toLowerCase();
+    const searching = q.length > 0;
+    let hit = null;
+    if (searching) {
+      hit = new Set(nodes.filter((n) => (n.label + " " + n.tip).toLowerCase().includes(q)).map((n) => n.id));
+      for (const id of [...hit]) for (const m of adj.get(id) || []) hit.add(m);
+    }
+    const fN = st.focusId != null ? new Set([st.focusId, ...(adj.get(st.focusId) || [])]) : null;
+    for (const { n, cEl } of nodeEls) {
+      const hard = n.deg < st.minDeg;
+      let op;
+      if (hard) op = 0.05;
+      else if (fN) op = fN.has(n.id) ? 0.95 : 0.05;
+      else if (hit) op = hit.has(n.id) ? 0.95 : 0.07;
+      else op = n.kind === "episode" ? 0.6 : 0.92;
+      cEl.setAttribute("fill-opacity", op);
+      cEl.style.pointerEvents = hard ? "none" : "auto";
+    }
+    for (const { l, el: ln, base } of lineEls) {
+      let op = base;
+      if (!st.relOn[l.rel] || l.s.deg < st.minDeg || l.t.deg < st.minDeg) op = 0;
+      else if (fN) op = (l.s.id === st.focusId || l.t.id === st.focusId || (fN.has(l.s.id) && fN.has(l.t.id))) ? 0.7 : 0.02;
+      else if (hit) op = hit.has(l.s.id) && hit.has(l.t.id) ? Math.max(base, 0.3) : 0.03;
+      ln.setAttribute("stroke-opacity", op);
+    }
+    const bar = $("#gbar"), tip = $("#gtip");
+    if (st.focusId != null) {
+      const n = nById.get(st.focusId);
+      bar.style.display = "block";
+      tip.innerHTML = "📍 局部图谱 · #" + n.id + " [" + (K[n.kind]?.[0] || n.kind) + "] " + esc(n.tip) + ' · <a style="cursor:pointer;text-decoration:underline dotted" onclick="window.__graphExit()">返回全图</a>';
+    } else if (searching) {
+      bar.style.display = "block";
+      tip.textContent = "🔍 过滤「" + st.q + "」· 邻域 " + hit.size + " 节点";
+    } else bar.style.display = "none";
+  };
+  window.__graphExit = () => { st.focusId = null; applyState(); };
+
+  const dnd = { n: null, sx: 0, sy: 0, moved: false };
+  const pan = { on: false, x: 0, y: 0 };
+  svg.addEventListener("mousedown", (ev) => { // 背景按下 = 平移；节点按下走自己的 handler
+    if (ev.target === svg) { pan.on = true; pan.x = ev.clientX; pan.y = ev.clientY; }
   });
-  svg.addEventListener("mouseup", () => { drag.n = null; });
-  svg.addEventListener("mouseleave", () => { drag.n = null; });
+  svg.addEventListener("mousemove", (ev) => {
+    if (dnd.n && dnd.moved) {
+      const [x, y] = toSvg(ev.clientX, ev.clientY);
+      dnd.n.x = Math.max(16, Math.min(W - 16, x)); dnd.n.y = Math.max(16, Math.min(H - 16, y));
+      dnd.setPos(dnd.n.x, dnd.n.y);
+    } else if (dnd.n) {
+      if (Math.abs(ev.clientX - dnd.sx) + Math.abs(ev.clientY - dnd.sy) > 4) dnd.moved = true;
+    } else if (pan.on) {
+      const r = svg.getBoundingClientRect();
+      view.tx -= (ev.clientX - pan.x) * (W / view.k) / r.width;
+      view.ty -= (ev.clientY - pan.y) * (H / view.k) / r.height;
+      pan.x = ev.clientX; pan.y = ev.clientY;
+      applyView();
+    }
+  });
+  const endGesture = () => { dnd.n = null; pan.on = false; };
+  svg.addEventListener("mouseup", endGesture);
+  svg.addEventListener("mouseleave", endGesture);
+  svg.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    const f = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const kNew = Math.max(0.5, Math.min(5, view.k * f));
+    const [px, py] = toSvg(ev.clientX, ev.clientY);
+    view.tx = px - (px - view.tx) * (view.k / kNew); // 鼠标下的点保持不动
+    view.ty = py - (py - view.ty) * (view.k / kNew);
+    view.k = kNew;
+    applyView();
+  }, { passive: false });
+  svg.addEventListener("dblclick", () => { view.k = 1; view.tx = 0; view.ty = 0; st.focusId = null; applyView(); applyState(); });
+  $("#greset").addEventListener("click", () => { view.k = 1; view.tx = 0; view.ty = 0; st.focusId = null; st.q = ""; $("#gq").value = ""; applyView(); applyState(); });
+  let sTimer;
+  $("#gq").addEventListener("input", (e) => { clearTimeout(sTimer); sTimer = setTimeout(() => { st.q = e.target.value; applyState(); }, 200); });
+  for (const cb of document.querySelectorAll('#grep input[type="checkbox"]'))
+    cb.addEventListener("change", () => { st.relOn[cb.dataset.rel] = cb.checked; applyState(); });
+  $("#gmin").addEventListener("change", (e) => { st.minDeg = Number(e.target.value); applyState(); });
   el.appendChild(svg);
+  applyState();
 };
 const KCOL = { preference: "#c8402e", fact: "#2563eb", todo: "#b45309", procedure: "#0f766e", episode: "#71717a" };
 const fmt = (t) => esc(t).split("\\n").join("<br>");
