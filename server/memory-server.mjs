@@ -227,16 +227,30 @@ function sleepPassAnnounced() {
   if (r.decayed) { announce("dormant", { ids: r.ids }); regenerateCurrentMd(); }
   return r;
 }
+// v0.11 索引形态（Anthropic《The components of agent memory》依据：注入层必须小，
+// 加载不等于遵循；Claude Code 基线为 200行/25KB 索引）。置顶条目全文，
+// 其余每条一行指针，内容细节靠 memory_recall 检索。
+const IDX_SNIPPET = 32; // 一行指针的内容截断长度（字符）
+function idxLine(r) {
+  const body = String(r.content ?? "").replace(/\s+/g, " ").trim();
+  const short = body.length <= IDX_SNIPPET ? body : body.slice(0, IDX_SNIPPET) + "…";
+  return `- #${r.id} [${r.updated_at.slice(0, 10)}] ${short}`;
+}
 function regenerateCurrentMd() {
   const rows = db.prepare("SELECT * FROM memories WHERE status='active' ORDER BY kind, updated_at DESC").all();
   const byKind = {};
   for (const r of rows) (byKind[r.kind] ??= []).push(r);
-  let out = `# 用户记忆 · current\n\n> 由 lm-memory MCP server 自动生成（${now()}）。手工修改会被下次写入覆盖；修正请走 memory_correct。\n`;
+  let out = `# 用户记忆 · current\n\n> 由 lm-memory MCP server 自动生成（${now()}）。索引形态：置顶条目全文，其余每条一行指针（#id 批注）；细节用 memory_recall 检索，修正走 memory_correct，手工修改会被下次写入覆盖。\n`;
+  const pinned = rows.filter((r) => r.pinned);
+  if (pinned.length) {
+    out += `\n## 置顶（全文）\n\n`;
+    for (const r of pinned) out += `- [${r.updated_at.slice(0, 10)}] ${r.content}${r.tags ? `  #${r.tags.split(",").filter(Boolean).join(" #")}` : ""}（v${r.version}）\n`;
+  }
   for (const kind of ["preference", "fact", "procedure", "todo"]) { // episode 只可检索，不进基线文件
-    const list = byKind[kind];
-    if (!list?.length) continue;
+    const list = (byKind[kind] ?? []).filter((r) => !r.pinned);
+    if (!list.length) continue;
     out += `\n## ${KIND_LABELS[kind]}\n\n`;
-    for (const r of list) out += `- [${r.updated_at.slice(0, 10)}] ${r.content}${r.tags ? `  #${r.tags.split(",").filter(Boolean).join(" #")}` : ""}（v${r.version}）\n`;
+    for (const r of list) out += idxLine(r) + "\n";
   }
   fs.writeFileSync(CURRENT_MD, out);
 }
@@ -286,7 +300,7 @@ function checkSecret(content) {
 
 // ---------- server ----------
 const server = new McpServer(
-  { name: "lm-memory", version: "0.10.0" },
+  { name: "lm-memory", version: "0.11.0" },
   {
     capabilities: { tools: {} },
     instructions:

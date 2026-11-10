@@ -1,6 +1,6 @@
 {
   "name": "dsh-lm-memory",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "本地优先的 Agent 长期记忆：MCP server（SQLite+FTS5+双语语义+遗忘曲线）+ DSH 采集插件（会话摘要卡/日期锚定/模型跟随）",
   "type": "module",
   "license": "MIT",
@@ -23,18 +23,32 @@
     "cordis.patch.yml",
     "docs"
   ],
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.23.0",
     "@huggingface/transformers": "^3.0.0"
   },
-  "keywords": ["dsh", "dsh-plugin", "memory", "mcp", "long-term-memory", "living-memory"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "memory",
+    "mcp",
+    "long-term-memory",
+    "living-memory"
+  ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
-      "inject": ["@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-ui-slots"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
     }
   }
 }

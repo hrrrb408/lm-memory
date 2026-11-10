@@ -8,7 +8,7 @@
 换一个会话、换一个 Agent（DSH / Claude Code / 任何 MCP 宿主），AI 就失忆了。
 lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记忆层——不只是记住，还会新陈代谢。
 
-## 功能总览（v0.10）
+## 功能总览（v0.11）
 
 | 能力 | 说明 |
 |---|---|
@@ -21,6 +21,8 @@ lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记
 | **自动提炼** | 会话结束把用户发言蒸馏为 ≤4 条 preference/fact/procedure/todo |
 | **模型跟随** | 提炼/摘要默认跟随会话所用模型；可显式配置；无 key 优雅降级为纯检索模式 |
 | **变更热流（v0.10）** | 写操作追加 `changes.jsonl`（带内容摘要），capture 插件经 `agent/pre-step` 向**已开会话**实时注入记忆 delta——不再"旧会话碰壁才发现新记忆" |
+| **索引注入层（v0.11）** | `current.md` 改索引形态：置顶条目全文 + 其余每条一行指针（#id 保留可定位），细节靠 `memory_recall`——注入层体积 90KB→约 20KB，对齐 Anthropic《The components of agent memory》"注入层必须小" |
+| **dream 去重扫描（v0.11）** | `dream.mjs` 纯函数 + `scripts/dream-dryrun.mjs` 只读 CLI：嵌入余弦扫疑似重复对（跨 kind），人审后合并——dreaming 的库内第一步（对照 transcript 校对属后续版本） |
 | **viewer** | 本地管理页：搜索、版本历史、用户画像、**休眠馆**（唤醒/置顶）、命中统计 |
 | **跨平台** | 路径全部动态解析（DSH_HOME/HOME），macOS / Windows / Linux 通用 |
 
@@ -49,6 +51,23 @@ memory_remember/correct/forget/pin/unpin/wake/sleep
 - **开关**：插件配置 `refresh: false` 一键关闭；viewer 管理页的写操作走 MCP 工具处理器，热流自动覆盖
 - **viewer 旧版自动升级（v0.10）**：viewer 是 detached 进程，app 重启杀不掉——插件启动时探测 `/api/version`（缺端点或版本旧 → lsof 定位端口 pid、ps 校验命令行含 viewer.mjs 防误杀 → SIGTERM → 拉起新 viewer），否则管理页写操作会永远走旧 server、不进热流
 - **验证**：`node server/refresh-e2e.mjs` 全链路 22 断言；`node server/viewer-e2e.mjs` 升级路径 5 断言（写流→读流→注入→幂等→隔离→半行→reject 透传；旧版 kill→新版拉起→不重复重启）
+
+## 索引注入层与 dream 去重扫描（v0.11）
+
+**依据**：Anthropic《The components of agent memory》（2026-11-06）——注入层必须小（加载不等于遵循，
+Claude Code 基线 200 行/25KB 索引）；dreaming 的价值在拿原始记录校对与去重。
+
+- **索引注入层**：`regenerateCurrentMd` 改索引形态——置顶条目全文在场，其余每条一行 `#id [日期] 32字摘要`；
+  episode 依旧只可检索。实测 226 条 active 从 90KB 降到约 20KB；长条目细节用 `memory_recall(id 或关键词)` 取全文。
+- **dream 去重扫描**：`server/dream.mjs` 导出 `findDuplicatePairs(db, { threshold=0.88, maxPairs=100 })`——
+  对 active 且有嵌入的条目做两两余弦（嵌入写入时已 normalize，跨 kind 参与），返回相似对按分降序。
+  `scripts/dream-dryrun.mjs [db路径] [--threshold=0.88]` 只读打开真库出报告（`readOnly:true`，绝不写库）；
+  合并由人审后走 `memory_correct`/`memory_forget`，本版不做自动合并。
+- **写侧闸门（约定层）**：入库前先 recall 查重；LifeOS 正册已有档案的主题只存指针条目；流水账不入库。
+  落在宿主 AGENTS.md（服务端不强制——让模型自己判断显著性，对齐"给模型自由比死规则有效"的实验结论）。
+- **验证**：`current-md-e2e.mjs` 12 断言（截断/折叠/pinned 全文/episode 排除/25KB 线）；
+  `dream-e2e.mjs` 8 断言（高相似抓取/正交不误报/deleted 排除/阈值敏感/跨 kind）；
+  既有 sleep 16 + refresh 22 + e2e-test 全量回归通过。
 
 ## 架构
 
