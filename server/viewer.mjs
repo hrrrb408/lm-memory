@@ -219,85 +219,146 @@ window.showView = (v) => {
   if (v === "dormant") loadDormant();
   if (v === "graph") loadGraph();
 };
-// v0.12 图谱页：零依赖 SVG 力导图（预跑 300 步降温出稳定布局，节点可拖拽整理）
-const REL_COLOR = { similar: "#7c3aed", co_tag: "#0f766e", ref: "#b45309" };
+// v0.12 图谱页：零依赖 SVG 力导图（深色星图画布 · kind 分区聚簇 · 边分级退后 · hover 聚焦一跳）
+const REL_COLOR = { similar: "#b48cff", co_tag: "#4fd1a5", ref: "#f5a524" };
 window.loadGraph = async () => {
   const d = await (await fetch("/api/graph")).json();
   const el = $("#graph");
   const stats = d.nodes.length + " 节点 · " + d.links.length + " 边（" +
-    ["similar", "co_tag", "ref"].map((r) => '<span style="color:' + (REL_COLOR[r] || "#666") + '">'+ r + ' ' + (d.byRel[r] || 0) + "</span>").join(" · ") + "）· 悬停看内容，节点可拖拽";
-  el.innerHTML = '<div class="meta" style="margin-bottom:10px">' + stats + "</div>";
-  const W = Math.max(el.clientWidth - 2, 600), H = 620;
-  const nodes = d.nodes.map((n, i) => ({ ...n, x: 0, y: 0, deg: 0 }));
-  const R0 = Math.min(W, H) / 2 - 40;
-  nodes.forEach((n, i) => { const a = (2 * Math.PI * i) / nodes.length; n.x = W / 2 + R0 * Math.cos(a); n.y = H / 2 + R0 * Math.sin(a); });
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const links = d.links.map((l) => ({ ...l, s: byId.get(l.source), t: byId.get(l.target) })).filter((l) => l.s && l.t);
-  for (const l of links) { l.s.deg++; l.t.deg++; }
-  for (let step = 0; step < 300; step++) {
-    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i], b = nodes[j];
-      let dx = a.x - b.x, dy = a.y - b.y;
-      const d2 = dx * dx + dy * dy + 0.01;
-      if (d2 > 40000) continue;
-      const f = 900 / d2, dist = Math.sqrt(d2);
-      dx /= dist; dy /= dist;
-      a.x += dx * f; a.y += dy * f; b.x -= dx * f; b.y -= dy * f;
-    }
-    for (const l of links) {
-      let dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
-      const f = (dist - 70) * 0.02;
-      dx /= dist; dy /= dist;
-      l.s.x += dx * f; l.s.y += dy * f; l.t.x -= dx * f; l.t.y -= dy * f;
-    }
-    for (const n of nodes) {
-      n.x += (W / 2 - n.x) * 0.01; n.y += (H / 2 - n.y) * 0.01;
-      n.x = Math.max(16, Math.min(W - 16, n.x)); n.y = Math.max(16, Math.min(H - 16, n.y));
-    }
-  }
+    ["similar", "co_tag", "ref"].map((r) => '<span style="color:' + (REL_COLOR[r] || "#666") + '">'+ r + ' ' + (d.byRel[r] || 0) + "</span>").join(" · ") + "）· 悬停聚焦一跳，节点可拖拽";
+  const legend = Object.entries(K).map(([k, v]) =>
+    '<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#a8a29e"><i style="width:8px;height:8px;border-radius:50%;background:' + v[1] + '"></i>' + v[0] + "</span>").join("");
+  el.innerHTML = '<div class="meta" style="margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;justify-content:space-between">'
+    + '<span>' + stats + '</span><span style="display:inline-flex;gap:12px">' + legend + "</span></div>";
+  const W = Math.max(el.clientWidth - 2, 600), H = 680;
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("width", W); svg.setAttribute("height", H);
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-  svg.style.cssText = "background:var(--card);border:1px solid var(--line);border-radius:14px;touch-action:none";
+  svg.style.cssText = "background:#14110d;border:1px solid #2e2a24;border-radius:14px;touch-action:none;display:block";
+  // 深底微光：中心径向渐变，星图质感
+  const defs = document.createElementNS(NS, "defs");
+  defs.innerHTML = '<radialGradient id="gGlow" cx="50%" cy="46%" r="65%">'
+    + '<stop offset="0%" stop-color="#221d15"/><stop offset="100%" stop-color="#14110d"/></radialGradient>';
+  svg.appendChild(defs);
+  const bg = document.createElementNS(NS, "rect");
+  bg.setAttribute("width", W); bg.setAttribute("height", H); bg.setAttribute("fill", "url(#gGlow)");
+  svg.appendChild(bg);
+
+  // 初始布局：kind 五簇分区（簇心均匀分布在大圆上，簇内高斯散布）→ 聚簇感先于力导
+  const kinds = ["fact", "procedure", "episode", "preference", "todo"];
+  const centers = {};
+  kinds.forEach((k, i) => { const a = 2 * Math.PI * i / kinds.length - Math.PI / 2; centers[k] = { x: W / 2 + (Math.min(W, H) * 0.33) * Math.cos(a), y: H / 2 + (Math.min(W, H) * 0.33) * Math.sin(a) }; });
+  const gauss = () => (Math.random() + Math.random() + Math.random() + Math.random() - 2) / 2;
+  const nodes = d.nodes.map((n) => {
+    const c0 = centers[n.kind] || { x: W / 2, y: H / 2 };
+    return { ...n, x: Math.max(20, Math.min(W - 20, c0.x + gauss() * W * 0.16)), y: Math.max(20, Math.min(H - 20, c0.y + gauss() * H * 0.20)), deg: 0 };
+  });
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const links = d.links.map((l) => ({ ...l, s: byId.get(l.source), t: byId.get(l.target) })).filter((l) => l.s && l.t);
+  for (const l of links) { l.s.deg++; l.t.deg++; }
+  // 力导降温（弱斥力+弹簧，保分区感；仅高权重边参与弹簧）
+  for (let step = 0; step < 260; step++) {
+    const cool = 1 - step / 300;
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      let dx = a.x - b.x, dy = a.y - b.y;
+      const d2 = dx * dx + dy * dy + 0.01;
+      if (d2 > 36000) continue;
+      const f = (620 / d2) * cool, dist = Math.sqrt(d2);
+      dx /= dist; dy /= dist;
+      a.x += dx * f; a.y += dy * f; b.x -= dx * f; b.y -= dy * f;
+    }
+    for (const l of links) {
+      if ((l.weight || 1) < 1.5 && l.rel !== "similar") continue;
+      let dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+      const f = (dist - 64) * 0.03 * cool;
+      dx /= dist; dy /= dist;
+      l.s.x += dx * f; l.s.y += dy * f; l.t.x -= dx * f; l.t.y -= dy * f;
+    }
+    for (const n of nodes) {
+      const c0 = centers[n.kind]; // 向本簇心收拢（分区不散）
+      n.x += (c0.x - n.x) * 0.012 * cool; n.y += (c0.y - n.y) * 0.012 * cool;
+      n.x = Math.max(16, Math.min(W - 16, n.x)); n.y = Math.max(16, Math.min(H - 16, n.y));
+    }
+  }
+  // 边分层：weight≥1.5 正常可见；低权重退到近隐形（信息在，视觉退后）
+  const edgeLevel = (l) => ((l.weight || 1) >= 1.5 || l.rel === "similar" && (l.weight || 1) >= 0.9) ? 1 : 0;
   const lineEls = links.map((l) => {
     const ln = document.createElementNS(NS, "line");
     ln.setAttribute("x1", l.s.x); ln.setAttribute("y1", l.s.y);
     ln.setAttribute("x2", l.t.x); ln.setAttribute("y2", l.t.y);
-    ln.setAttribute("stroke", REL_COLOR[l.rel] || "#999");
-    ln.setAttribute("stroke-width", Math.min(0.6 + (l.weight || 1) * 0.7, 4));
-    ln.setAttribute("stroke-opacity", Math.min(0.2 + (l.weight || 1) * 0.15, 0.8));
+    ln.setAttribute("stroke", REL_COLOR[l.rel] || "#666");
+    ln.setAttribute("stroke-width", Math.min(0.5 + (l.weight || 1) * 0.6, 3.2));
+    ln.setAttribute("stroke-opacity", edgeLevel(l) ? Math.min(0.16 + (l.weight || 1) * 0.14, 0.55) : 0.05);
     svg.appendChild(ln);
-    return { l, el: ln };
+    return { l, el: ln, base: Number(ln.getAttribute("stroke-opacity")) };
   });
+  // hub 标签：度数 top 6，左右交错挂 + 深色描边防重叠糊团
+  const hubs = [...nodes].sort((a, b) => b.deg - a.deg).slice(0, 6);
+  const hubSet = new Set(hubs);
+  const hubSide = new Map(hubs.map((n, i) => [n.id, i % 2 === 0 ? -1 : 1]));
   const drag = { n: null };
   const nodeEls = nodes.map((n) => {
     const g = document.createElementNS(NS, "g");
+    const r = Math.min(3.5 + Math.sqrt(n.deg) * 1.9, 13);
     const cEl = document.createElementNS(NS, "circle");
-    cEl.setAttribute("cx", n.x); cEl.setAttribute("cy", n.y);
-    cEl.setAttribute("r", Math.min(3 + n.deg * 0.9, 11));
-    cEl.setAttribute("fill", KCOL[n.kind] || "#666");
-    cEl.setAttribute("fill-opacity", n.pinned ? 1 : 0.85);
-    if (n.pinned) { cEl.setAttribute("stroke", "#1c1917"); cEl.setAttribute("stroke-width", "1.5"); }
+    cEl.setAttribute("cx", n.x); cEl.setAttribute("cy", n.y); cEl.setAttribute("r", r);
+    cEl.setAttribute("fill", K[n.kind]?.[1] || "#888");
+    cEl.setAttribute("fill-opacity", n.kind === "episode" ? 0.55 : 0.9);
+    if (n.pinned) { cEl.setAttribute("stroke", "#f5e9d0"); cEl.setAttribute("stroke-width", "1.6"); cEl.setAttribute("stroke-opacity", "0.9"); }
     cEl.style.cursor = "grab";
     const tip = document.createElementNS(NS, "title");
     tip.textContent = "#" + n.id + " [" + (K[n.kind]?.[0] || n.kind) + "] " + n.tip;
     g.appendChild(cEl); g.appendChild(tip); svg.appendChild(g);
-    cEl.addEventListener("mousedown", (ev) => { drag.n = n; ev.preventDefault(); });
-    return { n, cEl };
+    let lbl = null;
+    if (hubSet.has(n)) {
+      const side = hubSide.get(n.id);
+      lbl = document.createElementNS(NS, "text");
+      lbl.setAttribute("x", n.x + side * (r + 5)); lbl.setAttribute("y", n.y + 3.5);
+      lbl.setAttribute("text-anchor", side < 0 ? "end" : "start");
+      lbl.setAttribute("font-size", "9.5");
+      lbl.setAttribute("fill", "#c9c2b4");
+      lbl.setAttribute("paint-order", "stroke");
+      lbl.setAttribute("stroke", "#14110d");
+      lbl.setAttribute("stroke-width", "2.6");
+      lbl.textContent = n.label;
+      g.appendChild(lbl);
+    }
+    const setPos = (x, y) => {
+      cEl.setAttribute("cx", x); cEl.setAttribute("cy", y);
+      if (lbl) { lbl.setAttribute("x", x + hubSide.get(n.id) * (r + 5)); lbl.setAttribute("y", y + 3.5); }
+      for (const { l, el: ln } of lineEls) {
+        if (l.s === n) { ln.setAttribute("x1", x); ln.setAttribute("y1", y); }
+        if (l.t === n) { ln.setAttribute("x2", x); ln.setAttribute("y2", y); }
+      }
+    };
+    cEl.addEventListener("mousedown", (ev) => { drag.n = { n, setPos }; ev.preventDefault(); });
+    // hover 聚焦：点亮一跳，其余退场
+    const focus = (on) => {
+      const near = new Set([n.id]);
+      for (const { l } of lineEls) {
+        if (l.s === n) near.add(l.t.id);
+        if (l.t === n) near.add(l.s.id);
+      }
+      for (const { n: o, cEl: oc } of nodeEls) {
+        if (o === n) continue;
+        oc.setAttribute("fill-opacity", on ? (near.has(o.id) ? 0.95 : 0.07) : (o.kind === "episode" ? 0.55 : 0.9));
+      }
+      for (const { l, el: ln, base } of lineEls) {
+        const touch = l.s === n || l.t === n;
+        ln.setAttribute("stroke-opacity", on ? (touch ? 0.85 : 0.02) : base);
+      }
+    };
+    cEl.addEventListener("mouseenter", () => focus(true));
+    cEl.addEventListener("mouseleave", () => focus(false));
+    return { n, cEl, setPos };
   });
   svg.addEventListener("mousemove", (ev) => {
     if (!drag.n) return;
     const rect = svg.getBoundingClientRect();
-    drag.n.x = Math.max(16, Math.min(W - 16, ev.clientX - rect.left));
-    drag.n.y = Math.max(16, Math.min(H - 16, ev.clientY - rect.top));
-    const pair = nodeEls.find((x) => x.n === drag.n);
-    pair.cEl.setAttribute("cx", drag.n.x); pair.cEl.setAttribute("cy", drag.n.y);
-    for (const { l, el: ln } of lineEls) {
-      if (l.s === drag.n) { ln.setAttribute("x1", drag.n.x); ln.setAttribute("y1", drag.n.y); }
-      if (l.t === drag.n) { ln.setAttribute("x2", drag.n.x); ln.setAttribute("y2", drag.n.y); }
-    }
+    drag.n.setPos(Math.max(16, Math.min(W - 16, ev.clientX - rect.left)), Math.max(16, Math.min(H - 16, ev.clientY - rect.top)));
   });
   svg.addEventListener("mouseup", () => { drag.n = null; });
   svg.addEventListener("mouseleave", () => { drag.n = null; });
