@@ -219,15 +219,21 @@ window.showView = (v) => {
   if (v === "dormant") loadDormant();
   if (v === "graph") loadGraph();
 };
-// v0.12 图谱页：零依赖 SVG 力导图（深色星图画布 · kind 分区聚簇 · 边分级退后 · hover 聚焦一跳）
-const REL_COLOR = { similar: "#b48cff", co_tag: "#4fd1a5", ref: "#f5a524" };
+// v0.12.2 图谱视觉（纸感路线，对齐爹 proven 审美：LifeOS 文人版/rushdeck 文人版的宣纸墨字系）
+// 画布=暖米白宣纸，节点=莫兰迪低饱和，边=墨色细线（铅笔稿感），分区聚簇+hover 聚焦保留
+const REL_COLOR = { similar: "#9a8fb8", co_tag: "#7a9e8e", ref: "#c9a227" };
+const PAPER = "#f7f4ee";       // 画布宣纸底（比页面 #fafaf9 深半档，卡片感）
+const INK_SOFT = "#8a8578";    // 墨灰（边）
+const INK_TXT = "#57534e";     // 墨字（标签）
+// 莫兰迪节点色（只用于图谱页，不碰全页共用 KIND_META——列表页 badge 保持原色）
+const NODE_COLOR = { preference: "#c26d5c", fact: "#5b7fa6", procedure: "#6f9c8a", todo: "#d9a05b", episode: "#b3ada0" };
 window.loadGraph = async () => {
   const d = await (await fetch("/api/graph")).json();
   const el = $("#graph");
   const stats = d.nodes.length + " 节点 · " + d.links.length + " 边（" +
     ["similar", "co_tag", "ref"].map((r) => '<span style="color:' + (REL_COLOR[r] || "#666") + '">'+ r + ' ' + (d.byRel[r] || 0) + "</span>").join(" · ") + "）· 悬停聚焦一跳，节点可拖拽";
-  const legend = Object.entries(K).map(([k, v]) =>
-    '<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#a8a29e"><i style="width:8px;height:8px;border-radius:50%;background:' + v[1] + '"></i>' + v[0] + "</span>").join("");
+  const legend = Object.entries(NODE_COLOR).map(([k, c]) =>
+    '<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)"><i style="width:8px;height:8px;border-radius:50%;background:' + c + '"></i>' + (K[k]?.[0] || k) + "</span>").join("");
   el.innerHTML = '<div class="meta" style="margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;justify-content:space-between">'
     + '<span>' + stats + '</span><span style="display:inline-flex;gap:12px">' + legend + "</span></div>";
   const W = Math.max(el.clientWidth - 2, 600), H = 680;
@@ -235,15 +241,7 @@ window.loadGraph = async () => {
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("width", W); svg.setAttribute("height", H);
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-  svg.style.cssText = "background:#14110d;border:1px solid #2e2a24;border-radius:14px;touch-action:none;display:block";
-  // 深底微光：中心径向渐变，星图质感
-  const defs = document.createElementNS(NS, "defs");
-  defs.innerHTML = '<radialGradient id="gGlow" cx="50%" cy="46%" r="65%">'
-    + '<stop offset="0%" stop-color="#221d15"/><stop offset="100%" stop-color="#14110d"/></radialGradient>';
-  svg.appendChild(defs);
-  const bg = document.createElementNS(NS, "rect");
-  bg.setAttribute("width", W); bg.setAttribute("height", H); bg.setAttribute("fill", "url(#gGlow)");
-  svg.appendChild(bg);
+  svg.style.cssText = "background:" + PAPER + ";border:1px solid var(--line);border-radius:14px;touch-action:none;display:block";
 
   // 初始布局：kind 五簇分区（簇心均匀分布在大圆上，簇内高斯散布）→ 聚簇感先于力导
   const kinds = ["fact", "procedure", "episode", "preference", "todo"];
@@ -289,9 +287,9 @@ window.loadGraph = async () => {
     const ln = document.createElementNS(NS, "line");
     ln.setAttribute("x1", l.s.x); ln.setAttribute("y1", l.s.y);
     ln.setAttribute("x2", l.t.x); ln.setAttribute("y2", l.t.y);
-    ln.setAttribute("stroke", REL_COLOR[l.rel] || "#666");
-    ln.setAttribute("stroke-width", Math.min(0.5 + (l.weight || 1) * 0.6, 3.2));
-    ln.setAttribute("stroke-opacity", edgeLevel(l) ? Math.min(0.16 + (l.weight || 1) * 0.14, 0.55) : 0.05);
+    ln.setAttribute("stroke", REL_COLOR[l.rel] || INK_SOFT);
+    ln.setAttribute("stroke-width", Math.min(0.5 + (l.weight || 1) * 0.5, 2.6));
+    ln.setAttribute("stroke-opacity", edgeLevel(l) ? Math.min(0.1 + (l.weight || 1) * 0.1, 0.38) : 0.04); // 铅笔稿感：细+低透
     svg.appendChild(ln);
     return { l, el: ln, base: Number(ln.getAttribute("stroke-opacity")) };
   });
@@ -305,9 +303,9 @@ window.loadGraph = async () => {
     const r = Math.min(3.5 + Math.sqrt(n.deg) * 1.9, 13);
     const cEl = document.createElementNS(NS, "circle");
     cEl.setAttribute("cx", n.x); cEl.setAttribute("cy", n.y); cEl.setAttribute("r", r);
-    cEl.setAttribute("fill", K[n.kind]?.[1] || "#888");
-    cEl.setAttribute("fill-opacity", n.kind === "episode" ? 0.55 : 0.9);
-    if (n.pinned) { cEl.setAttribute("stroke", "#f5e9d0"); cEl.setAttribute("stroke-width", "1.6"); cEl.setAttribute("stroke-opacity", "0.9"); }
+    cEl.setAttribute("fill", NODE_COLOR[n.kind] || "#999");
+    cEl.setAttribute("fill-opacity", n.kind === "episode" ? 0.6 : 0.92);
+    if (n.pinned) { cEl.setAttribute("stroke", "#1c1917"); cEl.setAttribute("stroke-width", "1.6"); cEl.setAttribute("stroke-opacity", "0.85"); }
     cEl.style.cursor = "grab";
     const tip = document.createElementNS(NS, "title");
     tip.textContent = "#" + n.id + " [" + (K[n.kind]?.[0] || n.kind) + "] " + n.tip;
@@ -319,9 +317,9 @@ window.loadGraph = async () => {
       lbl.setAttribute("x", n.x + side * (r + 5)); lbl.setAttribute("y", n.y + 3.5);
       lbl.setAttribute("text-anchor", side < 0 ? "end" : "start");
       lbl.setAttribute("font-size", "9.5");
-      lbl.setAttribute("fill", "#c9c2b4");
+      lbl.setAttribute("fill", INK_TXT);
       lbl.setAttribute("paint-order", "stroke");
-      lbl.setAttribute("stroke", "#14110d");
+      lbl.setAttribute("stroke", PAPER);
       lbl.setAttribute("stroke-width", "2.6");
       lbl.textContent = n.label;
       g.appendChild(lbl);
@@ -344,11 +342,11 @@ window.loadGraph = async () => {
       }
       for (const { n: o, cEl: oc } of nodeEls) {
         if (o === n) continue;
-        oc.setAttribute("fill-opacity", on ? (near.has(o.id) ? 0.95 : 0.07) : (o.kind === "episode" ? 0.55 : 0.9));
+        oc.setAttribute("fill-opacity", on ? (near.has(o.id) ? 0.95 : 0.1) : (o.kind === "episode" ? 0.6 : 0.92));
       }
       for (const { l, el: ln, base } of lineEls) {
         const touch = l.s === n || l.t === n;
-        ln.setAttribute("stroke-opacity", on ? (touch ? 0.85 : 0.02) : base);
+        ln.setAttribute("stroke-opacity", on ? (touch ? 0.8 : 0.03) : base);
       }
     };
     cEl.addEventListener("mouseenter", () => focus(true));
