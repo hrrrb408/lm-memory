@@ -29,3 +29,14 @@ test('kind applies to lexical, semantic-only, exact ID and graph-related results
     assert.deepEqual(await f.recall({ query: 'semantic-query', kind: 'episode' }), []);
   } finally { await f.close(); }
 });
+test('long passages with the same 400-character prefix store different bilingual vectors', async () => {
+  const f = await fixture({ LM_EMBED: '1', NODE_OPTIONS: `--import=${new URL('./mock-embeddings.mjs', import.meta.url).pathname}` });
+  try {
+    const a = await f.remember('x'.repeat(401) + 'TailA');
+    const b = await f.remember('x'.repeat(401) + 'TailB');
+    for (const col of ['emb', 'emb_en']) {
+      const read = id => Buffer.from(f.db.prepare(`SELECT ${col} v FROM memories WHERE id=?`).get(id).v);
+      assert.notDeepEqual(read(a), read(b));
+    }
+  } finally { await f.close(); }
+});

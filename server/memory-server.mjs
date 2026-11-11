@@ -20,6 +20,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { rebuildEdges, neighbors } from "./graph.mjs";
 import { runSleepPass } from "./sleep.mjs";
+import { embeddingCacheKey } from "./recall-utils.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
 const DB_PATH = path.join(MEM_DIR, "memory.db");
@@ -166,7 +167,7 @@ async function getEmbedderEn() {
 async function embedEn(text, isQuery = false) {
   const p = await getEmbedderEn();
   if (!p) return null;
-  const key = (isQuery ? "eq:" : "ep:") + text.slice(0, 400);
+  const key = embeddingCacheKey(EMB_EN_MODEL, text, isQuery, isQuery ? EMB_EN_QUERY_PREFIX : "");
   if (embCache.has(key)) return embCache.get(key);
   try {
     const out = await p(isQuery ? EMB_EN_QUERY_PREFIX + text : text, { pooling: "mean", normalize: true });
@@ -189,7 +190,7 @@ const embCache = new Map();
 async function embed(text, isQuery = false) {
   const p = await getEmbedder();
   if (!p) return null;
-  const key = (isQuery ? "q:" : "p:") + text.slice(0, 400);
+  const key = embeddingCacheKey(EMB_MODEL, text, isQuery, isQuery ? EMB_QUERY_PREFIX : "");
   if (embCache.has(key)) return embCache.get(key);
   try {
     const out = await p(isQuery ? EMB_QUERY_PREFIX + text : text, { pooling: "mean", normalize: true });
