@@ -39,7 +39,7 @@ v0 是纯文件。若未来迁移到 MCP server（SQLite+FTS5），数据从这�
 - **召回埋点**：每次 `memory_recall` 返回的记忆记一次命中（`hit_count` / `last_hit_at`）
 - **宽限期**（按 kind）：todo 45 天、episode 60 天、fact/procedure 120 天、preference 240 天
 - **命中延期**：每命中一次 +7 天，上限 +90 天；修正/唤醒会重置时钟（`updated_at` 刷新）
-- **休眠（dormant）**：超期未置顶的 active 记忆转入 dormant——不再被召回、不进 current.md，但保留在库中可随时唤醒。触发：server 启动时 + 每 12 小时巡检 + `memory_sleep` 手动
+- **休眠（dormant）**：超期未置顶的 active 记忆转入 dormant——默认召回不包含（显式 scope=dormant/all 可查）、不进 current.md，但保留在库中可随时唤醒。触发：server 启动时 + 每 12 小时巡检 + `memory_sleep` 手动
 - **置顶/唤醒**：`memory_pin`（pin / unpin / wake）——置顶永不休眠；对休眠记忆置顶会同时唤醒
 - 全部转换写入 `log.jsonl`（`sleep_pass` / `pin` / `unpin` / `wake`），可审计可回滚
 
@@ -75,3 +75,15 @@ v0 是纯文件。若未来迁移到 MCP server（SQLite+FTS5），数据从这�
 - 优先级：`llm` 块显式 `model`（用户接管）> 会话模型（provider 在映射表内：zai-coding-cn / deepseek-official / deepseek-api-key / agnes，自动带 baseURL+keyEnv）> 默认 glm-5.3-flash
 - key 从 `apiKeyEnv` 的环境变量或 `~/.dsh/.credentials.yaml` 同名条目读取；解析不到则优雅降级（跳过提炼，检索不受影响）
 - helper 的 stderr 会打印所选模型与来源，如 `[extract] LLM: glm-5.3 @ open.bigmodel.cn (来源: session(zai-coding-cn))`
+
+## 召回契约（可靠性修复，未发布）
+
+- `memory_recall({id: 123})` 或 `{query: "#123"}` 精确读全文；`query` / `id` 必须二选一。
+- `kind` 同时约束词法、语义、ID 与图谱关联结果；候选频率统计也使用相同范围。
+- 默认 `scope: "active"`；显式 `"dormant"` 只查休眠，`"all"` 查 active+dormant。任何范围都不含 deleted/superseded。
+- 返回记录含 `status`。休眠读取只作发现，不自动唤醒，也不更新休眠条目的命中统计；恢复使用 `memory_pin({id, action:"wake"})`。
+- 图谱目前只有 active-active 边，dormant 搜索不扩展图谱；all 的关联仍只含 active，并受 kind 约束。
+- 搜索默认 `max_bytes: 16384`，允许 512–65536 UTF-8 字节。预算按完整条目裁剪，绝不截断证据正文；超额返回 `{hits, related, budget:{max_bytes, omitted, notice}}`。预算内保留原数组格式，expand 时为 `{hits, related}`。无相关结果沿用原来的空结果提示。
+- ID 精确读取绕过搜索字节预算以兑现全文指针；最多一条主命中。搜索预算省略的候选不获得命中延期。
+- current.md 硬限 25KiB / 200 行，优先输出置顶（含 ID）再输出普通索引；超额保留整行并标明省略。置顶量超额时也会省略，应按需读取。热流注入硬限 8KiB / 40 行，原有每批 8 条限制保持。
+- 缓存身份包含完整文本、模型、query/passage 角色与查询前缀；RRF 缺失分支贡献为零。

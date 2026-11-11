@@ -4,6 +4,7 @@
 // 追加到 ~/.dsh/memory/pending-episodes.jsonl；由 lm-memory MCP server 在启动/召回时入库。
 // 纪律：任何异常都不得抛出宿主进程；只写 stderr；幂等（同一 session 只采一次）。
 import fs from "node:fs";
+import { boundedIndex } from "../../server/recall-utils.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -230,9 +231,9 @@ function buildDeltaText(changes) {
   let out = "【记忆库实时更新】本会话运行期间，记忆库写入了以下变更（晚于本会话启动时加载的记忆快照）：";
   if (lines.length) out += "\n" + lines.join("\n");
   if (injectable.length > 8) out += `\n- …另有 ${injectable.length - 8} 条变更（memory_list 可查全量）`;
-  if (dormantIds.length) out += `\n- 另有 ${dormantIds.length} 条长期未召回的记忆转入休眠（不再参与召回）。`;
+  if (dormantIds.length) out += `\n- 另有 ${dormantIds.length} 条长期未召回的记忆转入休眠（默认召回不包含；scope=dormant 可查）。`;
   out += "\n与当前任务相关的（尤其流程/坑/铁律类）一律以最新内容为准，需要全文调 memory_recall；标记「删除」的条目不要再引用；无关则忽略本条。";
-  return out;
+  return boundedIndex(out, 8192, 40);
 }
 
 function refreshHook(config) {

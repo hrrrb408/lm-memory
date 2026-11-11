@@ -40,3 +40,38 @@ test('long passages with the same 400-character prefix store different bilingual
     }
   } finally { await f.close(); }
 });
+test('dormant scope is explicit, filtered and read-only for lifecycle statistics', async () => {
+  for (const semantic of [false, true]) {
+    const f = await fixture(semantic ? { LM_EMBED: '1', NODE_OPTIONS: `--import=${new URL('./mock-embeddings.mjs', import.meta.url).pathname}` } : {});
+    try {
+      const id = await f.remember('sleepneedle 历史流程', 'procedure');
+      f.db.prepare("UPDATE memories SET status='dormant' WHERE id=?").run(id);
+      const before = f.db.prepare('SELECT status, hit_count, last_hit_at, updated_at FROM memories WHERE id=?').get(id);
+      assert.deepEqual(await f.recall({ query: 'sleepneedle' }), []);
+      for (const args of [{ query: 'sleepneedle' }, { id }, ...(semantic ? [{ query: 'semantic-query' }] : [])]) {
+        const rows = await f.recall({ ...args, scope: 'dormant', kind: 'procedure' });
+        assert.equal(rows[0].id, id); assert.equal(rows[0].status, 'dormant');
+        assert.deepEqual(await f.recall({ ...args, scope: 'dormant', kind: 'fact' }), []);
+        assert.equal((await f.recall({ ...args, scope: 'all' }))[0].id, id);
+      }
+      assert.deepEqual(f.db.prepare('SELECT status, hit_count, last_hit_at, updated_at FROM memories WHERE id=?').get(id), before);
+      for (const status of ['deleted', 'superseded']) {
+        f.db.prepare('UPDATE memories SET status=? WHERE id=?').run(status, id);
+        assert.deepEqual(await f.recall({ id, scope: 'all' }), []);
+      }
+    } finally { await f.close(); }
+  }
+});
+
+test('search budgets preserve whole evidence, while ID lookup returns complete text', async () => {
+  const f = await fixture();
+  try {
+    const content = 'budgetneedle ' + '预算内不能把证据截成半条。'.repeat(100);
+    const id = await f.remember(content);
+    const response = await f.recall({ query: 'budgetneedle', max_bytes: 512 });
+    assert.ok(Buffer.byteLength(JSON.stringify(response, null, 1)) <= 512);
+    assert.equal(response.budget.omitted, 1);
+    assert.deepEqual(response.hits, []);
+    assert.equal((await f.recall({ id, max_bytes: 512 }))[0].content, content);
+  } finally { await f.close(); }
+});

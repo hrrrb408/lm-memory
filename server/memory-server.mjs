@@ -20,7 +20,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { rebuildEdges, neighbors } from "./graph.mjs";
 import { runSleepPass } from "./sleep.mjs";
-import { embeddingCacheKey, rrfScore } from "./recall-utils.mjs";
+import { embeddingCacheKey, rrfScore, boundedRecall, boundedIndex } from "./recall-utils.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
 const DB_PATH = path.join(MEM_DIR, "memory.db");
@@ -260,11 +260,11 @@ function regenerateCurrentMd() {
   const rows = db.prepare("SELECT * FROM memories WHERE status='active' ORDER BY kind, updated_at DESC").all();
   const byKind = {};
   for (const r of rows) (byKind[r.kind] ??= []).push(r);
-  let out = `# 用户记忆 · current\n\n> 由 lm-memory MCP server 自动生成（${now()}）。索引形态：置顶条目全文，其余每条一行指针（#id 批注）；细节用 memory_recall 检索，修正走 memory_correct，手工修改会被下次写入覆盖。\n`;
+  let out = `# 用户记忆 · current\n\n> 由 lm-memory MCP server 自动生成（${now()}）。索引形态：置顶条目全文，其余每条一行指针（#id 批注）；细节用 memory_recall id（或 query="#id"）读取，修正走 memory_correct，手工修改会被下次写入覆盖。\n`;
   const pinned = rows.filter((r) => r.pinned);
   if (pinned.length) {
     out += `\n## 置顶（全文）\n\n`;
-    for (const r of pinned) out += `- [${r.updated_at.slice(0, 10)}] ${r.content}${r.tags ? `  #${r.tags.split(",").filter(Boolean).join(" #")}` : ""}（v${r.version}）\n`;
+    for (const r of pinned) out += `- #${r.id} [${r.updated_at.slice(0, 10)}] ${r.content.replace(/\s+/g, " ")}${r.tags ? `  #${r.tags.split(",").filter(Boolean).join(" #")}` : ""}（v${r.version}）\n`;
   }
   for (const kind of ["preference", "fact", "procedure", "todo"]) { // episode 只可检索，不进基线文件
     const list = (byKind[kind] ?? []).filter((r) => !r.pinned);
@@ -272,7 +272,7 @@ function regenerateCurrentMd() {
     out += `\n## ${KIND_LABELS[kind]}\n\n`;
     for (const r of list) out += idxLine(r) + "\n";
   }
-  fs.writeFileSync(CURRENT_MD, out);
+  fs.writeFileSync(CURRENT_MD, boundedIndex(out));
 }
 
 // dsh-lm-capture 插件写入的待处理 episode 队列 → 入库（幂等：按 session 标签去重）
@@ -357,20 +357,23 @@ server.registerTool("memory_remember", {
 
 server.registerTool("memory_recall", {
   title: "回忆",
-  description: "按 query 检索或按 id（也可 query=#123）精确读取全文。默认只返回 active；允许空结果。",
+  description: "按 query 检索或按 id（也可 query=#123）精确读取全文。默认只返回 active；scope 可显式搜索 dormant/all（不自动唤醒）。搜索受 max_bytes 预算约束，id 取全文不截断。",
   inputSchema: {
     query: z.string().min(1).max(500).optional().describe("自然语言查询或 #id；与 id 二选一"),
     id: z.number().int().positive().optional().describe("精确读取索引指针全文；与 query 二选一"),
     limit: z.number().int().min(1).max(20).default(5),
     kind: z.enum(KINDS).optional(),
+    scope: z.enum(["active", "dormant", "all"]).default("active").describe("休眠记忆必须显式选择 dormant/all；不唤醒、不延寿"),
+    max_bytes: z.number().int().min(512).max(65536).default(16384).describe("搜索结果 JSON 字节预算；超额返回 hits/related/budget 对象，id 精确读取不受限"),
     expand: z.boolean().default(false).describe("图谱扩展：附带命中条目的一跳关联记忆（co_tag/similar/ref 边），实体中心问题用"),
   },
-}, async ({ query, id, limit, kind, expand }) => {
+}, async ({ query, id, limit, kind, expand, scope, max_bytes }) => {
   if ((query === undefined) === (id === undefined)) return ok("ERROR: query 与 id 必须且只能提供一个。");
   const exactId = id ?? (/^#([1-9]\d*)$/.exec(query.trim())?.[1] ? Number(query.trim().slice(1)) : undefined);
   ingestPending(); // 先消化自动采集队列，保证刚结束的会话可被检索
   const words = (query ?? "").replace(/["'^*]/g, " ").trim().split(/\s+/).filter(Boolean);
   const kindParams = kind ? [kind] : [];
+  const statusFilter = scope === "all" ? "status IN ('active','dormant')" : `status='${scope}'`;
   let rows = [];
   // 多样性排序：同 tags 组（如同会话的分块）先各取最优，再回填剩余名额
   const diversify = (rs, lim) => {
@@ -394,24 +397,24 @@ server.registerTool("memory_recall", {
     return out;
   };
   // 打分检索公共件：IDF 式停用词过滤 + 命中数排序 + 阈值
-  const activeCount = db.prepare("SELECT count(*) n FROM memories WHERE status='active'").get().n;
+  const activeCount = db.prepare(`SELECT count(*) n FROM memories WHERE ${statusFilter} ${kind ? "AND kind=?" : ""}`).get(...kindParams).n;
   const QWORDS = new Set(["什么", "怎么", "哪个", "哪些", "多少", "如何", "为什么", "吗", "呢", "是不是"]);
   const dropStop = (terms) => {
     const useful = terms.filter((t) => !QWORDS.has(t) && t.length >= 2);
     if (!useful.length) return terms;
-    const df = useful.map((t) => db.prepare("SELECT count(*) n FROM memories WHERE status='active' AND content LIKE ?").get(`%${t}%`).n);
+    const df = useful.map((t) => db.prepare(`SELECT count(*) n FROM memories WHERE ${statusFilter} ${kind ? "AND kind=?" : ""} AND content LIKE ?`).get(...kindParams, `%${t}%`).n);
     const kept = useful.filter((_, i) => df[i] < Math.max(3, Math.floor(activeCount / 2)));
     return kept.length ? kept : useful; // 全被过滤则退回（宁漏勿假死的兜底）
   };
   const scoredOr = (terms) => {
     const kept = dropStop(terms);
     if (!kept.length) return [];
-    const dfOf = (t) => db.prepare("SELECT count(*) n FROM memories WHERE status='active' AND content LIKE ?").get(`%${t}%`).n;
+    const dfOf = (t) => db.prepare(`SELECT count(*) n FROM memories WHERE ${statusFilter} ${kind ? "AND kind=?" : ""} AND content LIKE ?`).get(...kindParams, `%${t}%`).n;
     const rareFlags = kept.map((t) => dfOf(t) <= 3 && t.length >= 3); // 稀有完整词（≥3字符，df≤3）单独命中即有说服力；二元组不豁免
     const cases = kept.map(() => "(CASE WHEN content LIKE ? THEN 1 ELSE 0 END)").join(" + ");
     const rareCases = kept.map((t, i) => rareFlags[i] ? "(CASE WHEN content LIKE ? THEN 1 ELSE 0 END)" : "0").join(" + ");
     const scored = db.prepare(
-      `SELECT *, (${cases}) AS gscore, (${rareCases}) AS rscore FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""}
+      `SELECT *, (${cases}) AS gscore, (${rareCases}) AS rscore FROM memories WHERE ${statusFilter} ${kind ? "AND kind=?" : ""}
        ORDER BY gscore DESC, rscore DESC, updated_at DESC LIMIT ?`
     ).all(...kept.map((t) => `%${t}%`), ...kept.filter((_, i) => rareFlags[i]).map((t) => `%${t}%`), ...kindParams, limit * 3);
     const minScore = Math.max(2, Math.ceil(kept.length * 0.2));
@@ -430,7 +433,7 @@ server.registerTool("memory_recall", {
     return [...new Set(out)];
   };
   if (exactId !== undefined) {
-    rows = db.prepare(`SELECT * FROM memories WHERE id=? AND status='active' ${kind ? "AND kind=?" : ""}`).all(exactId, ...kindParams);
+    rows = db.prepare(`SELECT * FROM memories WHERE id=? AND ${statusFilter} ${kind ? "AND kind=?" : ""}`).all(exactId, ...kindParams);
   } else {
   // 1) 单词查询：FTS trigram 短语精确匹配（≥3 字符才可用 trigram 索引）
   try {
@@ -438,7 +441,7 @@ server.registerTool("memory_recall", {
       const match = `"${words[0]}"`;
       rows = diversify(db.prepare(
         `SELECT m.* FROM memories m JOIN memories_fts f ON f.rowid = m.id
-         WHERE memories_fts MATCH ? AND m.status='active' ${kind ? "AND m.kind=?" : ""}
+         WHERE memories_fts MATCH ? AND ${statusFilter.replaceAll("status", "m.status")} ${kind ? "AND m.kind=?" : ""}
          ORDER BY bm25(memories_fts) LIMIT ?`
       ).all(...(kind ? [match, kind, limit * 3] : [match, limit * 3])), limit);
     }
@@ -455,7 +458,7 @@ server.registerTool("memory_recall", {
   // 5) 单个短词兜底：LIKE
   if (!rows.length && words.length === 1) {
     rows = db.prepare(
-      `SELECT * FROM memories WHERE status='active' ${kind ? "AND kind=?" : ""} AND (content LIKE ? OR tags LIKE ?)
+      `SELECT * FROM memories WHERE ${statusFilter} ${kind ? "AND kind=?" : ""} AND (content LIKE ? OR tags LIKE ?)
        ORDER BY updated_at DESC LIMIT ?`
     ).all(...kindParams, `%${words[0]}%`, `%${words[0]}%`, limit);
   }
@@ -469,7 +472,7 @@ server.registerTool("memory_recall", {
     if (qv) {
       const semCol = isZhQ ? "emb" : "emb_en";
       const semRows = [];
-      for (const r of db.prepare(`SELECT id, ${semCol} AS vec FROM memories WHERE status='active' ${kind ? 'AND kind=?' : ''} AND ${semCol} IS NOT NULL`).all(...kindParams)) {
+      for (const r of db.prepare(`SELECT id, ${semCol} AS vec FROM memories WHERE ${statusFilter} ${kind ? 'AND kind=?' : ''} AND ${semCol} IS NOT NULL`).all(...kindParams)) {
         const v = blobToF32(r.vec);
         if (!v) continue;
         const cs = cosF32(qv, v);
@@ -506,23 +509,23 @@ server.registerTool("memory_recall", {
     }
   }
   } // 非 ID 搜索
-  if (rows.length) { // v0.7 命中埋点：被召回的记忆获得休眠延期（价值信号）
-    const tHit = now();
-    const bump = db.prepare("UPDATE memories SET hit_count = hit_count + 1, last_hit_at = ? WHERE id = ? AND status = 'active'");
-    for (const r of rows) bump.run(tHit, r.id);
-  }
-  audit("recall", { query: (query ?? `#${id}`).slice(0, 60), hits: rows.length, ids: rows.map((r) => r.id) });
-  if (!rows.length) return ok("[]（无相关记忆。不确定就不编造。）");
-  const hits = rows.map((r) => ({ id: r.id, v: r.version, kind: r.kind, date: r.updated_at.slice(0, 10), content: r.content, tags: r.tags }));
-  if (expand) { // v0.12 图谱一跳扩展：related 独立于 hits，带建边依据（rel/权重/锚点）
+  let related = [];
+  const hits = rows.map((r) => ({ id: r.id, v: r.version, kind: r.kind, date: r.updated_at.slice(0, 10), content: r.content, tags: r.tags, status: r.status }));
+  if (expand && scope !== "dormant") { // v0.12 图谱一跳扩展：related 独立于 hits，带建边依据（rel/权重/锚点）
     const rel = neighbors(db, rows.map((r) => r.id), { limit: 6, exclude: new Set(rows.map((r) => r.id)) });
-    const related = rel.map((n) => {
+    related = rel.map((n) => {
       const m = db.prepare("SELECT id, version, kind, updated_at, content, tags FROM memories WHERE id=? AND status='active' AND (? IS NULL OR kind=?)").get(n.id, kind ?? null, kind ?? null);
-      return m ? { id: m.id, v: m.version, kind: m.kind, date: m.updated_at.slice(0, 10), content: m.content, tags: m.tags, graph: `${n.rel}(w=${n.weight}) via #${n.via}` } : null;
+      return m ? { id: m.id, v: m.version, kind: m.kind, date: m.updated_at.slice(0, 10), content: m.content, tags: m.tags, status: "active", graph: `${n.rel}(w=${n.weight}) via #${n.via}` } : null;
     }).filter(Boolean);
-    return ok(JSON.stringify({ hits, related }, null, 1));
   }
-  return ok(JSON.stringify(hits, null, 1));
+  const result = exactId !== undefined ? (expand ? { hits, related } : hits) : boundedRecall(hits, related, max_bytes, expand);
+  const delivered = Array.isArray(result) ? result : result.hits;
+  // Only evidence actually returned earns an active-memory hit; dormant reads never wake/extend it.
+  const bump = db.prepare("UPDATE memories SET hit_count=hit_count+1, last_hit_at=? WHERE id=? AND status='active'");
+  for (const r of delivered) bump.run(now(), r.id);
+  audit("recall", { query: (query ?? `#${id}`).slice(0, 60), scope, hits: delivered.length, ids: delivered.map(r => r.id) });
+  if (!hits.length) return ok("[]（无相关记忆。不确定就不编造。）");
+  return ok(JSON.stringify(result, null, 1));
 });
 
 server.registerTool("memory_correct", {

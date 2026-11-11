@@ -18,3 +18,17 @@ test('RRF missing ranks contribute zero, with symmetric lexical/semantic treatme
   assert.equal(rrfScore(4, [lex, sem]), 0);
   assert.ok(rrfScore(3, [lex, sem]) > rrfScore(2, [lex, sem]));
 });
+
+test('index limits multibyte text and line count, including oversized pinned content', async () => {
+  const { boundedIndex, boundedRecall } = await import('../server/recall-utils.mjs');
+  const text = '# current\n' + Array.from({length: 500}, (_, i) => `- #${i} 中文正文😀${'很长'.repeat(200)}`).join('\n');
+  const result = boundedIndex(text);
+  assert.ok(Buffer.byteLength(result) <= 25 * 1024);
+  assert.ok(result.trimEnd().split('\n').length <= 200);
+  assert.match(result, /注入预算已满/);
+  assert.ok(!result.includes('�'));
+  const small = '- #1 短文本\n'; assert.equal(boundedIndex(small), small);
+  const budget = boundedRecall([{id: 1, content: '中'.repeat(300)}], [{id: 2, content: '短'}], 512, true);
+  assert.equal(budget.related[0].id, 2); assert.equal(budget.budget.omitted, 1);
+  assert.ok(Buffer.byteLength(JSON.stringify(budget, null, 1)) <= 512);
+});
