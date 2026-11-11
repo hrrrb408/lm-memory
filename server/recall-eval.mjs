@@ -109,7 +109,7 @@ for (const [kind, content] of EN) enIds.push(idOf(await call("memory_remember", 
 
 // 等待 backfill 嵌入完成（最多 90s）
 const db = new DatabaseSync(DB);
-for (let i = 0; i < 90; i++) {
+for (let i = 0; process.env.LM_EMBED !== "0" && i < 90; i++) {
   const { n } = db.prepare("SELECT count(*) n FROM memories WHERE emb IS NOT NULL AND emb_en IS NOT NULL AND status='active'").get();
   if (n >= ZH.length + EN.length) break;
   await new Promise((r) => setTimeout(r, 1000));

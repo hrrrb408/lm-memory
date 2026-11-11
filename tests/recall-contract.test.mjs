@@ -72,6 +72,7 @@ test('search budgets preserve whole evidence, while ID lookup returns complete t
     assert.ok(Buffer.byteLength(JSON.stringify(response, null, 1)) <= 512);
     assert.equal(response.budget.omitted, 1);
     assert.deepEqual(response.hits, []);
+    assert.equal(f.db.prepare("SELECT hit_count FROM memories WHERE id=?").get(id).hit_count, 0);
     assert.equal((await f.recall({ id, max_bytes: 512 }))[0].content, content);
   } finally { await f.close(); }
 });

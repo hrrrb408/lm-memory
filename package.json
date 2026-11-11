@@ -50,5 +50,9 @@
         "@deepseek-ai/dsh-client-ui-slots"
       ]
     }
+  },
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "test:recall": "node scripts/eval/recall-regression.mjs"
   }
 }

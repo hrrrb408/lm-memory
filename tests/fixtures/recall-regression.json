@@ -1,0 +1,755 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "scripts/eval/dataset.json",
+    "source_sha256": "5915d5a1c9c39e20ddaf9a18ea47c327ca588507814080a4dea096303e438f59",
+    "limitations": "既有真实使用场景整理集，未提供原始用户对话，不能认证为逐字真实问题。新增多证据题是派生组合题。未读取生产库。",
+    "redactions": [
+      "account handle",
+      "institution",
+      "group number",
+      "personal paths",
+      "dates"
+    ],
+    "annotation": "required_groups 中每组至少命中一条全文才算该组证据齐全；多组全部命中才算完整；relevant_ids 是允许相关的穷举标签。"
+  },
+  "memories": [
+    {
+      "id": "m01",
+      "kind": "preference",
+      "content": "用户偏好中文交流，主通道是微信，语气轻松爱开玩笑，给 agent 起外号\"大肥鱼\"",
+      "source_ref": "scripts/eval/dataset.json:m01"
+    },
+    {
+      "id": "m02",
+      "kind": "preference",
+      "content": "用户警惕过度工程，评价过\"好像弄得复杂过头了\"，方案要先给最简可用版",
+      "source_ref": "scripts/eval/dataset.json:m02"
+    },
+    {
+      "id": "m03",
+      "kind": "preference",
+      "content": "用户审美偏好编辑型/克制风格，不喜欢紫色渐变和等宽三卡片布局这类 AI 模板味",
+      "source_ref": "scripts/eval/dataset.json:m03"
+    },
+    {
+      "id": "m04",
+      "kind": "fact",
+      "content": "用户的电脑是 MacBook M4 Pro，内存 48GB，系统 macOS（Apple Silicon 架构）",
+      "source_ref": "scripts/eval/dataset.json:m04"
+    },
+    {
+      "id": "m05",
+      "kind": "fact",
+      "content": "用户帮一位在甲大学读研的朋友查询过 Origin 正版授权方案；注意用户本人不是甲大学的",
+      "source_ref": "scripts/eval/dataset.json:m05"
+    },
+    {
+      "id": "m06",
+      "kind": "fact",
+      "content": "用户桌面上有 dsh-ui-test 文件夹，存放 16 个网页设计风格实验页和总览页，正本在 测试工作区",
+      "source_ref": "scripts/eval/dataset.json:m06"
+    },
+    {
+      "id": "m07",
+      "kind": "fact",
+      "content": "用户安装了 DSH Desktop 0.2.1-rc.3、Codex CLI 0.141.0 和 Claude Code CLI 三个 agent 宿主",
+      "source_ref": "scripts/eval/dataset.json:m07"
+    },
+    {
+      "id": "m08",
+      "kind": "fact",
+      "content": "Codex CLI 使用 ChatGPT 账号登录，2026 年 10 月起所有模型返回 model_not_found，暂不可用",
+      "source_ref": "scripts/eval/dataset.json:m08"
+    },
+    {
+      "id": "m09",
+      "kind": "fact",
+      "content": "lm-memory 项目已于 2026-01-15 开源到 GitHub 仓库 example-user/lm-memory，MIT 协议",
+      "source_ref": "scripts/eval/dataset.json:m09"
+    },
+    {
+      "id": "m10",
+      "kind": "fact",
+      "content": "用户的 GitHub 账号是 example-user，npm 包名 lm-memory-server 已确认可用但尚未发布",
+      "source_ref": "scripts/eval/dataset.json:m10"
+    },
+    {
+      "id": "m11",
+      "kind": "procedure",
+      "content": "DSH profile 覆盖层新增插件必须用 insert: 键，纯 id+name 条目会报 entry not found",
+      "source_ref": "scripts/eval/dataset.json:m11"
+    },
+    {
+      "id": "m12",
+      "kind": "procedure",
+      "content": "跑隔离测试用 dsh --profile headless --patch 覆盖层文件，模型凭据从启动环境注入，--patch 可重复叠加",
+      "source_ref": "scripts/eval/dataset.json:m12"
+    },
+    {
+      "id": "m13",
+      "kind": "procedure",
+      "content": "npm 缓存被 root 权限污染时，用 npm_config_cache=/tmp/新目录 绕过，不需要 sudo",
+      "source_ref": "scripts/eval/dataset.json:m13"
+    },
+    {
+      "id": "m14",
+      "kind": "procedure",
+      "content": "DSH 网页界面裸地址会返回 401，必须用带 token 的完整链接打开",
+      "source_ref": "scripts/eval/dataset.json:m14"
+    },
+    {
+      "id": "m15",
+      "kind": "procedure",
+      "content": "SQLite FTS5 外部内容表不能重复插入同 rowid，否则索引损坏报 database disk image is malformed，重建需删库重导",
+      "source_ref": "scripts/eval/dataset.json:m15"
+    },
+    {
+      "id": "m16",
+      "kind": "episode",
+      "content": "会话 2026-01-04｜帮朋友调研 Origin：确认甲大学有网络版授权，Mac 需装虚拟机，QQ 群 [群号已移除]",
+      "source_ref": "scripts/eval/dataset.json:m16"
+    },
+    {
+      "id": "m17",
+      "kind": "episode",
+      "content": "会话 2026-01-06｜用户闲聊问 agent 在干嘛，互相斗嘴，确立\"大肥鱼\"称呼",
+      "source_ref": "scripts/eval/dataset.json:m17"
+    },
+    {
+      "id": "m18",
+      "kind": "episode",
+      "content": "会话 2026-01-15｜从 M0 侦察到开源发布：源码验证 A1/A2 接口、MCP 探针实测、三步落地记忆系统",
+      "source_ref": "scripts/eval/dataset.json:m18"
+    },
+    {
+      "id": "m19",
+      "kind": "fact",
+      "content": "用户的项目目录在 /workspace/，包括 plugin 子项目和新建的 lm-memory 仓库",
+      "source_ref": "scripts/eval/dataset.json:m19"
+    },
+    {
+      "id": "m20",
+      "kind": "fact",
+      "content": "Living Memory 原始设计文档由 GPT 生成，存于 docs/design/ 目录，约 1000 行，被评价为约束过多",
+      "source_ref": "scripts/eval/dataset.json:m20"
+    },
+    {
+      "id": "m21",
+      "kind": "preference",
+      "content": "用户吃饭口味未知，从未讨论过饮食偏好",
+      "source_ref": "scripts/eval/dataset.json:m21"
+    },
+    {
+      "id": "m22",
+      "kind": "fact",
+      "content": "DSH 内置鲸鱼挂件插件 dsh-whale-widget 显示 DeepSeek 余额，位于网页界面右下角",
+      "source_ref": "scripts/eval/dataset.json:m22"
+    },
+    {
+      "id": "m23",
+      "kind": "fact",
+      "content": "甲大学研究生院采购了 OriginPro 网络版 500 并发，按校园网 IP 授权，全校师生可用",
+      "source_ref": "scripts/eval/dataset.json:m23"
+    },
+    {
+      "id": "m24",
+      "kind": "procedure",
+      "content": "macOS 的 ls 不支持 --time-style 参数，rm 对 -- 开头目录名要用 -- 终止符",
+      "source_ref": "scripts/eval/dataset.json:m24"
+    },
+    {
+      "id": "m25",
+      "kind": "preference",
+      "content": "写公众号文案时用户偏好先给结论再展开细节",
+      "source_ref": "scripts/eval/dataset.json:m25"
+    },
+    {
+      "id": "m26",
+      "kind": "fact",
+      "content": "用户参加过一个设计审美测试，16 个页面里最认可 Anthropic 式的暖米色衬线风格",
+      "source_ref": "scripts/eval/dataset.json:m26"
+    },
+    {
+      "id": "m27",
+      "kind": "fact",
+      "content": "Claude Code CLI 已通过 claude mcp add -s user 永久注册了 lm-memory 服务器",
+      "source_ref": "scripts/eval/dataset.json:m27"
+    },
+    {
+      "id": "m28",
+      "kind": "fact",
+      "content": "用户的手机是 iPhone，型号未知",
+      "source_ref": "scripts/eval/dataset.json:m28"
+    },
+    {
+      "id": "m29",
+      "kind": "procedure",
+      "content": "Electron 宿主进程里 process.execPath 指向 Electron 而不是 node，spawn 子进程要走独立 node 路径",
+      "source_ref": "scripts/eval/dataset.json:m29"
+    },
+    {
+      "id": "m30",
+      "kind": "episode",
+      "content": "会话 2026-01-15｜用户在新会话测试记忆系统，问\"记不记得我们今天做了什么\"",
+      "source_ref": "scripts/eval/dataset.json:m30"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q01",
+      "query": "微信",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m01"
+      ],
+      "required_groups": [
+        [
+          "m01"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[0]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q02",
+      "query": "MacBook",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m04"
+      ],
+      "required_groups": [
+        [
+          "m04"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[1]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q03",
+      "query": "甲大学 Origin",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m23",
+        "m05"
+      ],
+      "required_groups": [
+        [
+          "m23",
+          "m05"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[2]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q04",
+      "query": "insert 语法",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m11"
+      ],
+      "required_groups": [
+        [
+          "m11"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[3]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q05",
+      "query": "GitHub 仓库",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m09",
+        "m10"
+      ],
+      "required_groups": [
+        [
+          "m09",
+          "m10"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[4]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q06",
+      "query": "鲸鱼挂件",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m22"
+      ],
+      "required_groups": [
+        [
+          "m22"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[5]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q07",
+      "query": "npm 缓存",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m13"
+      ],
+      "required_groups": [
+        [
+          "m13"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[6]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q08",
+      "query": "过度工程",
+      "category": "A-关键词",
+      "relevant_ids": [
+        "m02"
+      ],
+      "required_groups": [
+        [
+          "m02"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[7]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q09",
+      "query": "他用什么芯片的电脑",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m04"
+      ],
+      "required_groups": [
+        [
+          "m04"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[8]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q10",
+      "query": "怎么在 mac 上跑 windows 专属软件",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m16"
+      ],
+      "required_groups": [
+        [
+          "m16"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[9]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q11",
+      "query": "账号登录不上模型报错怎么办",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m08"
+      ],
+      "required_groups": [
+        [
+          "m08"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[10]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q12",
+      "query": "数据库索引坏了怎么修复",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m15"
+      ],
+      "required_groups": [
+        [
+          "m15"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[11]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q13",
+      "query": "用户给 AI 起了什么外号",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m01"
+      ],
+      "required_groups": [
+        [
+          "m01"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[12]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q14",
+      "query": "网页打不开显示无权限",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m14"
+      ],
+      "required_groups": [
+        [
+          "m14"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[13]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q15",
+      "query": "代码开源了吗放哪了",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m09"
+      ],
+      "required_groups": [
+        [
+          "m09"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[14]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q16",
+      "query": "他喜欢什么样的设计风格",
+      "category": "B-语义改写",
+      "relevant_ids": [
+        "m03",
+        "m26"
+      ],
+      "required_groups": [
+        [
+          "m03",
+          "m26"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[15]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q17",
+      "query": "Codex 现在能用吗",
+      "category": "C-时间/状态",
+      "relevant_ids": [
+        "m08"
+      ],
+      "required_groups": [
+        [
+          "m08"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[16]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q18",
+      "query": "最近在做什么项目",
+      "category": "C-时间/状态",
+      "relevant_ids": [
+        "m09",
+        "m18"
+      ],
+      "required_groups": [
+        [
+          "m09",
+          "m18"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[17]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q19",
+      "query": "npm 包发了吗",
+      "category": "C-时间/状态",
+      "relevant_ids": [
+        "m10"
+      ],
+      "required_groups": [
+        [
+          "m10"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[18]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q20",
+      "query": "今天聊了什么",
+      "category": "C-时间/状态",
+      "relevant_ids": [
+        "m18",
+        "m30"
+      ],
+      "required_groups": [
+        [
+          "m18",
+          "m30"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[19]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q21",
+      "query": "用户本人是哪个学校的",
+      "category": "F-干扰区分",
+      "relevant_ids": [
+        "m05"
+      ],
+      "required_groups": [
+        [
+          "m05"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[20]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q22",
+      "query": "谁的学校买了 Origin",
+      "category": "F-干扰区分",
+      "relevant_ids": [
+        "m23"
+      ],
+      "required_groups": [
+        [
+          "m23"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[21]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q23",
+      "query": "用户的电脑内存多大",
+      "category": "F-干扰区分",
+      "relevant_ids": [
+        "m04"
+      ],
+      "required_groups": [
+        [
+          "m04"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[22]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q24",
+      "query": "DSH 的记忆系统是什么架构",
+      "category": "F-干扰区分",
+      "relevant_ids": [
+        "m27",
+        "m09"
+      ],
+      "required_groups": [
+        [
+          "m27",
+          "m09"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[23]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q25",
+      "query": "哪条经验是关于 shell 命令的",
+      "category": "F-干扰区分",
+      "relevant_ids": [
+        "m24"
+      ],
+      "required_groups": [
+        [
+          "m24"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[24]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q26",
+      "query": "用户手机型号",
+      "category": "F-干扰区分",
+      "relevant_ids": [
+        "m28"
+      ],
+      "required_groups": [
+        [
+          "m28"
+        ]
+      ],
+      "source_ref": "scripts/eval/dataset.json:queries[25]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q27",
+      "query": "用户最喜欢的披萨口味",
+      "category": "E-空结果",
+      "relevant_ids": [],
+      "required_groups": [],
+      "source_ref": "scripts/eval/dataset.json:queries[26]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q28",
+      "query": "用户的生日",
+      "category": "E-空结果",
+      "relevant_ids": [],
+      "required_groups": [],
+      "source_ref": "scripts/eval/dataset.json:queries[27]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q29",
+      "query": "怎么配置 Kubernetes 集群",
+      "category": "E-空结果",
+      "relevant_ids": [],
+      "required_groups": [],
+      "source_ref": "scripts/eval/dataset.json:queries[28]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q30",
+      "query": "用户的家庭住址",
+      "category": "E-空结果",
+      "relevant_ids": [],
+      "required_groups": [],
+      "source_ref": "scripts/eval/dataset.json:queries[29]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q31",
+      "query": "Python 虚拟环境创建方法",
+      "category": "E-空结果",
+      "relevant_ids": [],
+      "required_groups": [],
+      "source_ref": "scripts/eval/dataset.json:queries[30]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "q32",
+      "query": "用户昨晚吃了什么",
+      "category": "E-空结果",
+      "relevant_ids": [],
+      "required_groups": [],
+      "source_ref": "scripts/eval/dataset.json:queries[31]",
+      "provenance": "existing-curated-scenario; raw user wording unverified"
+    },
+    {
+      "id": "multi1",
+      "query": "用户的电脑内存和手机型号分别是什么",
+      "category": "multi-evidence",
+      "relevant_ids": [
+        "m04",
+        "m28"
+      ],
+      "required_groups": [
+        [
+          "m04"
+        ],
+        [
+          "m28"
+        ]
+      ],
+      "source_ref": "derived combination of existing corpus facts",
+      "provenance": "derived multi-session scenario, not a verbatim user utterance"
+    },
+    {
+      "id": "multi2",
+      "query": "Origin 授权是谁的学校提供的，Mac 怎么使用",
+      "category": "multi-evidence",
+      "relevant_ids": [
+        "m05",
+        "m16",
+        "m23"
+      ],
+      "required_groups": [
+        [
+          "m05"
+        ],
+        [
+          "m16"
+        ],
+        [
+          "m23"
+        ]
+      ],
+      "source_ref": "derived combination of existing corpus facts",
+      "provenance": "derived multi-session scenario, not a verbatim user utterance"
+    },
+    {
+      "id": "multi3",
+      "query": "设计风格偏好和审美测试结果是什么",
+      "category": "multi-evidence",
+      "relevant_ids": [
+        "m03",
+        "m26"
+      ],
+      "required_groups": [
+        [
+          "m03"
+        ],
+        [
+          "m26"
+        ]
+      ],
+      "source_ref": "derived combination of existing corpus facts",
+      "provenance": "derived multi-session scenario, not a verbatim user utterance"
+    },
+    {
+      "id": "multi4",
+      "query": "Codex 登录故障与 Electron 子进程启动分别有什么注意事项",
+      "category": "multi-evidence",
+      "relevant_ids": [
+        "m08",
+        "m29"
+      ],
+      "required_groups": [
+        [
+          "m08"
+        ],
+        [
+          "m29"
+        ]
+      ],
+      "source_ref": "derived combination of existing corpus facts",
+      "provenance": "derived multi-session scenario, not a verbatim user utterance"
+    },
+    {
+      "id": "multi5",
+      "query": "记忆项目是否开源，Claude Code 怎么注册",
+      "category": "multi-evidence",
+      "relevant_ids": [
+        "m09",
+        "m27"
+      ],
+      "required_groups": [
+        [
+          "m09"
+        ],
+        [
+          "m27"
+        ]
+      ],
+      "source_ref": "derived combination of existing corpus facts",
+      "provenance": "derived multi-session scenario, not a verbatim user utterance"
+    }
+  ]
+}
