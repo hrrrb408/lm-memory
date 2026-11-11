@@ -468,7 +468,7 @@ server.registerTool("memory_recall", {
     if (qv) {
       const semCol = isZhQ ? "emb" : "emb_en";
       const semRows = [];
-      for (const r of db.prepare(`SELECT id, ${semCol} AS vec FROM memories WHERE status='active' AND ${semCol} IS NOT NULL`).all()) {
+      for (const r of db.prepare(`SELECT id, ${semCol} AS vec FROM memories WHERE status='active' ${kind ? 'AND kind=?' : ''} AND ${semCol} IS NOT NULL`).all(...kindParams)) {
         const v = blobToF32(r.vec);
         if (!v) continue;
         const cs = cosF32(qv, v);
@@ -516,7 +516,7 @@ server.registerTool("memory_recall", {
   if (expand) { // v0.12 图谱一跳扩展：related 独立于 hits，带建边依据（rel/权重/锚点）
     const rel = neighbors(db, rows.map((r) => r.id), { limit: 6, exclude: new Set(rows.map((r) => r.id)) });
     const related = rel.map((n) => {
-      const m = db.prepare("SELECT id, version, kind, updated_at, content, tags FROM memories WHERE id=? AND status='active'").get(n.id);
+      const m = db.prepare("SELECT id, version, kind, updated_at, content, tags FROM memories WHERE id=? AND status='active' AND (? IS NULL OR kind=?)").get(n.id, kind ?? null, kind ?? null);
       return m ? { id: m.id, v: m.version, kind: m.kind, date: m.updated_at.slice(0, 10), content: m.content, tags: m.tags, graph: `${n.rel}(w=${n.weight}) via #${n.via}` } : null;
     }).filter(Boolean);
     return ok(JSON.stringify({ hits, related }, null, 1));

@@ -17,3 +17,15 @@ test('ID pointers read full active text with strict argument and lifecycle bound
     }
   } finally { await f.close(); }
 });
+test('kind applies to lexical, semantic-only, exact ID and graph-related results', async () => {
+  const f = await fixture({ LM_EMBED: '1', NODE_OPTIONS: `--import=${new URL('./mock-embeddings.mjs', import.meta.url).pathname}` });
+  try {
+    const fact = await f.remember('alpha lexical anchor', 'fact', 'shared');
+    await f.remember('wrong type semantic distractor', 'todo', 'shared');
+    assert.deepEqual((await f.recall({ query: 'semantic-query', kind: 'fact' })).map(r => r.id), [fact]);
+    const result = await f.recall({ query: 'alpha', kind: 'fact', expand: true });
+    assert.equal(result.hits.length, 1);
+    assert.ok([...result.hits, ...result.related].every(r => r.kind === 'fact'));
+    assert.deepEqual(await f.recall({ query: 'semantic-query', kind: 'episode' }), []);
+  } finally { await f.close(); }
+});

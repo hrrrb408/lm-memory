@@ -10,7 +10,7 @@ export async function fixture(env = {}) {
   const client = new Client({ name: 'contract-test', version: '1' });
   await client.connect(new StdioClientTransport({ command: process.execPath,
     args: [fileURLToPath(new URL('../server/memory-server.mjs', import.meta.url))],
-    env: { ...process.env, ...env, LM_MEMORY_DIR: dir, LM_EMBED: '0' }, stderr: 'pipe' }));
+    env: { ...process.env, LM_EMBED: '0', ...env, LM_MEMORY_DIR: dir }, stderr: 'pipe' }));
   const db = new DatabaseSync(path.join(dir, 'memory.db'));
   const call = async (name, args) => (await client.callTool({ name, arguments: args })).content[0].text;
   return { dir, db, call, recall: async (args) => {
