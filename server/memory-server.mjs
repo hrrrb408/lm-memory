@@ -356,16 +356,19 @@ server.registerTool("memory_remember", {
 
 server.registerTool("memory_recall", {
   title: "回忆",
-  description: "按查询检索当前有效记忆。只返回 active 条目；允许空结果。",
+  description: "按 query 检索或按 id（也可 query=#123）精确读取全文。默认只返回 active；允许空结果。",
   inputSchema: {
-    query: z.string().min(1).max(500).describe("自然语言查询（中文可用）"),
+    query: z.string().min(1).max(500).optional().describe("自然语言查询或 #id；与 id 二选一"),
+    id: z.number().int().positive().optional().describe("精确读取索引指针全文；与 query 二选一"),
     limit: z.number().int().min(1).max(20).default(5),
     kind: z.enum(KINDS).optional(),
     expand: z.boolean().default(false).describe("图谱扩展：附带命中条目的一跳关联记忆（co_tag/similar/ref 边），实体中心问题用"),
   },
-}, async ({ query, limit, kind, expand }) => {
+}, async ({ query, id, limit, kind, expand }) => {
+  if ((query === undefined) === (id === undefined)) return ok("ERROR: query 与 id 必须且只能提供一个。");
+  const exactId = id ?? (/^#([1-9]\d*)$/.exec(query.trim())?.[1] ? Number(query.trim().slice(1)) : undefined);
   ingestPending(); // 先消化自动采集队列，保证刚结束的会话可被检索
-  const words = query.replace(/["'^*]/g, " ").trim().split(/\s+/).filter(Boolean);
+  const words = (query ?? "").replace(/["'^*]/g, " ").trim().split(/\s+/).filter(Boolean);
   const kindParams = kind ? [kind] : [];
   let rows = [];
   // 多样性排序：同 tags 组（如同会话的分块）先各取最优，再回填剩余名额
@@ -425,6 +428,9 @@ server.registerTool("memory_recall", {
     }
     return [...new Set(out)];
   };
+  if (exactId !== undefined) {
+    rows = db.prepare(`SELECT * FROM memories WHERE id=? AND status='active' ${kind ? "AND kind=?" : ""}`).all(exactId, ...kindParams);
+  } else {
   // 1) 单词查询：FTS trigram 短语精确匹配（≥3 字符才可用 trigram 索引）
   try {
     if (words.length === 1 && words[0].length >= 3) {
@@ -498,12 +504,13 @@ server.registerTool("memory_recall", {
       }
     }
   }
+  } // 非 ID 搜索
   if (rows.length) { // v0.7 命中埋点：被召回的记忆获得休眠延期（价值信号）
     const tHit = now();
     const bump = db.prepare("UPDATE memories SET hit_count = hit_count + 1, last_hit_at = ? WHERE id = ? AND status = 'active'");
     for (const r of rows) bump.run(tHit, r.id);
   }
-  audit("recall", { query: query.slice(0, 60), hits: rows.length, ids: rows.map((r) => r.id) });
+  audit("recall", { query: (query ?? `#${id}`).slice(0, 60), hits: rows.length, ids: rows.map((r) => r.id) });
   if (!rows.length) return ok("[]（无相关记忆。不确定就不编造。）");
   const hits = rows.map((r) => ({ id: r.id, v: r.version, kind: r.kind, date: r.updated_at.slice(0, 10), content: r.content, tags: r.tags }));
   if (expand) { // v0.12 图谱一跳扩展：related 独立于 hits，带建边依据（rel/权重/锚点）
