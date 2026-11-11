@@ -20,7 +20,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { rebuildEdges, neighbors } from "./graph.mjs";
 import { runSleepPass } from "./sleep.mjs";
-import { embeddingCacheKey } from "./recall-utils.mjs";
+import { embeddingCacheKey, rrfScore } from "./recall-utils.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
 const DB_PATH = path.join(MEM_DIR, "memory.db");
@@ -485,7 +485,7 @@ server.registerTool("memory_recall", {
         const semRank = new Map(semTop.map((x, i) => [x.id, i]));
         for (const id of allIds) {
           const base = byId.get(id) ?? { id, rrf: 0 };
-          base.rrf = (1 / (60 + 1 + (lexRank.get(id) ?? 60))) + (semRank.has(id) ? 1 / (60 + 1 + semRank.get(id)) : 0);
+          base.rrf = rrfScore(id, [lexRank, semRank]);
           byId.set(id, base);
         }
         const fused = [...byId.values()].sort((a, b) => b.rrf - a.rrf);
