@@ -279,6 +279,22 @@ t("插件不再直接 spawn helper（统一走 server 登记+领取入口）", !
   t("耗尽任务归档到 failed/ 目录", fs.existsSync(path.join(jobsDir, "failed", path.basename(exJob))));
 }
 
+// —— 场景 6g：禁外发+无 key 直接启动 helper → job 保留（第十一轮 P2：无 key 提前返回曾排在禁外发之前）——
+{
+  const nkJob = mkJob("ej-nk.json", ["无key禁外发甲", "无key禁外发乙"], { rev: "2026-11-17T04:04:00.000Z" });
+  const nkEnv = { ...process.env, LM_MEMORY_DIR: MEM_DIR, LM_EMBED: "0", LM_REMOTE_DISABLED: "1" };
+  delete nkEnv.LM_TEST_KEY; // 无 key（该 key 仅本测试注入，删除即模拟未配置凭据）
+  const hitsBefore = mockHits;
+  const rNK = await new Promise((resolve) => {
+    const ch = spawn(process.execPath, [helperPath, nkJob], { env: nkEnv });
+    ch.on("exit", (code) => resolve({ code }));
+  });
+  t("禁外发+无 key：0 请求", mockHits === hitsBefore, `hits=${mockHits - hitsBefore}`);
+  t("禁外发+无 key：job 保留（提前返回顺序修复）", rNK.code === 0 && fs.existsSync(nkJob), `exit=${rNK.code} job=${fs.existsSync(nkJob)}`);
+  const logTxt = fs.readFileSync(path.join(MEM_DIR, "log.jsonl"), "utf8");
+  t("审计含 extract_skipped_remote_disabled", logTxt.includes("extract_skipped_remote_disabled"));
+}
+
 // —— 场景 7：viewer Origin 边界 ——
 {
   const { execFileSync } = await import("node:child_process");

@@ -46,6 +46,13 @@ if (job.llm?.model) {
   KEY_ENV = "ZAI_CODING_CN_API_KEY";
 }
 console.error(`[extract] LLM: ${MODEL} @ ${BASE.replace(/^https?:\/\//, "").split("/")[0]} (来源: ${MODEL_SRC})`);
+// v0.16.4（第十一轮复核实锤：无 key 的提前返回在禁外发检查之前 → 禁外发+无 key 时 job 被删）：
+// 禁外发检查必须排在所有可能删除任务的提前返回之前——保留 job，恢复远程后可重跑。
+if (process.env.LM_REMOTE_DISABLED === "1") {
+  audit("extract_skipped_remote_disabled", { sessionId: job.sessionId, model: MODEL });
+  console.error(`[extract] ${job.sessionId}: LM_REMOTE_DISABLED=1，跳过外呼（job 保留）`);
+  process.exit(0);
+}
 let KEY = process.env[KEY_ENV];
 if (!KEY) {
   try {
@@ -61,11 +68,7 @@ if (!KEY) { // 无 key：优雅降级——跳过提炼（检索不受影响）�
 }
 // v0.16.3 网络入口防守（第十轮复核实锤：禁外发开关曾被通知入口绕过）：任何 spawn 路径拉起的 helper
 // 都在这里兜底——禁外发时不外呼、保留 job（恢复远程后可重跑），绝不因上游漏检而发请求。
-if (process.env.LM_REMOTE_DISABLED === "1") {
-  audit("extract_skipped_remote_disabled", { sessionId: job.sessionId, model: MODEL });
-  console.error(`[extract] ${job.sessionId}: LM_REMOTE_DISABLED=1，跳过外呼（job 保留）`);
-  process.exit(0);
-}
+// （v0.16.4：本检查已前移到无 key 等提前返回之前，此处保留注释说明语义。）
 
 async function llm(prompt) {
   // v0.16 失败感知（第七轮外审实锤：LLM 连续失败返回空串 → items=[] → exit 0 删任务 = 永久漏记）：
