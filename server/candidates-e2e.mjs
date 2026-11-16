@@ -52,6 +52,18 @@ t("摘要卡入库（active 恰一张）", rows("SELECT 1 FROM memories WHERE st
 t("第二张摘要卡同事务取代第一张（supersede，复核实锤旧规则丢新摘要）",
   rows("SELECT 1 FROM memories WHERE status='active' AND tags LIKE 'summary,%' AND tags LIKE '%session:s-ext-1%'").length === 1
   && rows("SELECT 1 FROM memories WHERE status='superseded' AND tags LIKE 'summary,%'").length === 1);
+
+// 摘要重放不倒退（复核实锤：消费 A→B 后重放 A，active 退回 A 并产生第三条）：
+// ① 同一候选身份重放（旧格式无 eid → 指纹身份命中 meta）必须被丢弃
+// ② 不同身份但更旧 revision（新 eid、旧 capturedAt）必须被版本序丢弃
+fs.writeFileSync(path.join(MEM_DIR, "pending-memories.jsonl"), [
+  JSON.stringify(summary), // ① 原样重放 A
+  JSON.stringify({ ...summary, eid: "replay-old-rev", capturedAt: summary.capturedAt }), // ② 旧 revision、新身份
+].join("\n") + "\n");
+await call("memory_recall", { query: "触发摘要重放" });
+t("重放后 active 仍为 B（不回退）", String(rows("SELECT content FROM memories WHERE status='active' AND tags LIKE 'summary,%'")[0]?.content ?? "").includes("续聊后更新"));
+t("重放后摘要版本数仍为 2（不新增版本）", rows("SELECT 1 FROM memories WHERE tags LIKE 'summary,%'").length === 2);
+t("旧 revision 候选被消费身份/版本序拦下", rows("SELECT 1 FROM meta WHERE key LIKE 'cand:replay-old-rev%'").length === 1 || rows("SELECT 1 FROM meta WHERE key LIKE 'cand:%'").length >= 2);
 t("队列文件已消费清空", !fs.existsSync(path.join(MEM_DIR, "pending-episodes.jsonl")) && !fs.existsSync(path.join(MEM_DIR, "pending-memories.jsonl")));
 const audits = fs.readFileSync(path.join(MEM_DIR, "log.jsonl"), "utf8");
 t("审计含 ingest_pending/ingest_candidates/commit_rejected", ["ingest_pending", "ingest_candidates", "commit_rejected"].every((k) => audits.includes(k)));

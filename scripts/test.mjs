@@ -7,11 +7,12 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lm-suite-'));
-const suites = ['sleep-e2e','dream-e2e','graph-e2e','current-md-e2e','refresh-e2e','viewer-e2e','e2e-test','recall-eval','conflict-e2e','lifecycle-e2e','candidates-e2e'];
+const suites = ['sleep-e2e','dream-e2e','graph-e2e','current-md-e2e','refresh-e2e','viewer-e2e','e2e-test','recall-eval','conflict-e2e','lifecycle-e2e','candidates-e2e','locomo-smoke'];
 const results = [];
 for (const suite of ['contracts', ...suites, 'fixed-regression']) {
   const args = suite === 'contracts' ? ['--test', ...fs.readdirSync(path.join(root,'tests')).filter(f => f.endsWith('.test.mjs')).map(f => `tests/${f}`)]
-    : suite === 'fixed-regression' ? ['scripts/eval/recall-regression.mjs'] : [`server/${suite}.mjs`];
+    : suite === 'fixed-regression' ? ['scripts/eval/recall-regression.mjs']
+    : suite === 'locomo-smoke' ? ['scripts/eval/locomo-smoke.mjs'] : [`server/${suite}.mjs`];
   const start = performance.now();
   const env = {...process.env, LM_EMBED:'0', LM_MEMORY_DIR:path.join(runDir,suite)};
   delete env.NODE_OPTIONS; // No inherited model doubles or external loaders.

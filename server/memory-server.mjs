@@ -17,6 +17,7 @@ try { ({ pipeline: hfPipeline, env: hfEnv } = await import("@huggingface/transfo
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { randomUUID, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { rebuildEdges, neighbors } from "./graph.mjs";
 import { runSleepPass } from "./sleep.mjs";
@@ -243,24 +244,30 @@ const CHANGES_PATH = path.join(MEM_DIR, "changes.jsonl");
 const OUTBOX_READY = (() => {
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS outbox (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, op TEXT NOT NULL, payload TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0)`);
+      id INTEGER PRIMARY KEY AUTOINCREMENT, eid TEXT, ts TEXT NOT NULL, op TEXT NOT NULL, payload TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0)`);
+    try { db.exec("ALTER TABLE outbox ADD COLUMN eid TEXT"); } catch {} // v0.15.2 迁移：稳定事件身份（旧表无 eid）
     return true;
   } catch (e) { console.error("[memory] outbox init:", e.message); return false; }
 })();
 const clip200 = (s) => String(s ?? "").slice(0, 200);
+// 事务内插入事件（调用方负责 BEGIN/COMMIT）：内容变更与事件同一 SQLite 事务，崩溃窗口消除。
+// eid = 稳定事件身份：至少一次投递下，消费端按 eid 去重（跨 offset 重发也只应用一次）。
+function outboxInsert(op, data = {}) {
+  db.prepare("INSERT INTO outbox (eid, ts, op, payload) VALUES (?,?,?,?)").run(randomUUID(), now(), op, JSON.stringify(data));
+}
 function announce(op, data = {}) {
   if (!OUTBOX_READY) { try { fs.appendFileSync(CHANGES_PATH, JSON.stringify({ ts: now(), op, ...data }) + "\n"); } catch {} return; }
-  try { db.prepare("INSERT INTO outbox (ts, op, payload) VALUES (?,?,?)").run(now(), op, JSON.stringify(data)); }
+  try { outboxInsert(op, data); } // 单条事务（隐式），事件自身原子
   catch (e) { console.error("[memory] outbox insert failed:", e.message); return; }
   flushOutbox(); // 同步尽力投递；失败留队，启动/召回/巡检/下次 announce 补发
 }
 function flushOutbox() {
   if (!OUTBOX_READY) return 0;
   let rows;
-  try { rows = db.prepare("SELECT id, ts, op, payload FROM outbox WHERE delivered=0 ORDER BY id").all(); } catch { return 0; }
+  try { rows = db.prepare("SELECT id, eid, ts, op, payload FROM outbox WHERE delivered=0 ORDER BY id").all(); } catch { return 0; }
   if (!rows.length) return 0;
   try {
-    const lines = rows.map((r) => JSON.stringify({ ts: r.ts, op: r.op, ...JSON.parse(r.payload) })).join("\n") + "\n";
+    const lines = rows.map((r) => JSON.stringify({ ts: r.ts, op: r.op, eid: r.eid ?? undefined, ...JSON.parse(r.payload) })).join("\n") + "\n";
     fs.appendFileSync(CHANGES_PATH, lines); // 整批一次追加；失败整批留队重试（不半交付）
     db.prepare(`UPDATE outbox SET delivered=1 WHERE id IN (${rows.map(() => "?").join(",")})`).run(...rows.map((r) => r.id));
     db.exec("DELETE FROM outbox WHERE delivered=1");
@@ -269,7 +276,10 @@ function flushOutbox() {
 }
 // sleep pass + 冲突扫描 + 热流通知（三处调用共用：工具/启动/12h 巡检）
 function sleepPassAnnounced() {
-  const r = runSleepPass(db, audit);
+  const r = runSleepPass(db, audit, (ids) => { // v0.15.2：休眠事件与状态变更同事务（复核实锤）
+    try { outboxInsert("dormant", { ids }); } catch (e) { console.error("[memory] dormant outbox insert failed:", e.message); throw e; }
+  });
+  if (r.decayed) { flushOutbox(); regenerateCurrentMd(); rebuildEdgesSafe(); }
   // v0.14 冲突消解扫描（人脑睡眠巩固的库内部分之二）：只读，疑似过时对只报告不处置，
   // 复核由人/agent 走 memory_correct（annotate 指针 / supersede 接棒）。
   let conflicts = null;
@@ -282,7 +292,6 @@ function sleepPassAnnounced() {
       });
     }
   } catch (e) { console.error("[memory] conflict_sweep error:", e.message); }
-  if (r.decayed) { announce("dormant", { ids: r.ids }); regenerateCurrentMd(); rebuildEdgesSafe(); }
   if (conflicts && conflicts.total) {
     announce("conflict_sweep", {
       total: conflicts.total,
@@ -458,18 +467,30 @@ function ingestPendingEpisodes() {
   return r.ok;
 }
 function ingestCandidates() {
+  const hashLegacy = (s) => createHash("sha256").update(s).digest("hex").slice(0, 16);
   const r = consumeQueueFile(CANDIDATES_PATH, (rec) => {
     if (!rec?.content || !KINDS.includes(rec.kind)) return true;
     const tags = String(rec.tags || "");
     const sid = String(rec.sessionId ?? "unknown");
+    // v0.15.2 候选稳定身份（复核实锤：摘要重放会把新版本退回旧版）：
+    // 新候选带 eid（helper 生成），旧候选回退 content+tags 指纹；已消费的候选 eid 记入 meta，重放直接丢弃。
+    const candKey = rec.eid || `legacy-${hashLegacy(`${tags}\u0000${rec.content}`)}`;
+    const metaKey = `cand:${candKey}`;
+    if (db.prepare("SELECT 1 FROM meta WHERE key=?").get(metaKey)) return true; // 已消费（含跨 offset 重放）
     if (tags.includes("summary,") || tags.startsWith("summary,")) {
-      // v0.15.1：摘要卡从「同会话幂等跳过」改为「同事务 supersede 更新」——会话续聊后的新摘要取代旧摘要
-      // （复核实锤：旧规则把第二张摘要丢弃，留下的永远是首次摘要）
-      const old = db.prepare("SELECT id FROM memories WHERE status='active' AND tags LIKE 'summary,%' AND tags LIKE ?").get(`%session:${sid}%`);
+      const old = db.prepare("SELECT id, created_at FROM memories WHERE status='active' AND tags LIKE 'summary,%' AND tags LIKE ?").get(`%session:${sid}%`);
+      if (old) {
+        // 版本序约束：旧 revision（或同 revision）的重放不得覆盖新 revision——A→B 后重放 A 仍保持 B
+        const oldRev = String(old.created_at || "");
+        const candRev = String(rec.capturedAt || "");
+        if (candRev && oldRev && candRev <= oldRev) { db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey); return true; }
+      }
       const c = commitMemoryTx({ kind: rec.kind, content: rec.content, tags, source: "auto-extract", createdAt: rec.capturedAt, eventDate: rec.eventDate, announceOp: old ? "correct" : "remember", supersedesId: old?.id });
+      if (c.ok || ["exists", "secret", "too_short"].includes(c.reason)) db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey);
       return c.ok || c.reason === "exists" || c.reason === "secret" || c.reason === "too_short";
     }
     const c = commitMemoryTx({ kind: rec.kind, content: rec.content, tags, source: "auto-extract", createdAt: rec.capturedAt, eventDate: rec.eventDate });
+    if (c.ok || ["exists", "secret", "too_short"].includes(c.reason)) db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey);
     return c.ok || c.reason === "exists" || c.reason === "secret" || c.reason === "too_short"; // 查重/凭据/过短=终态，不重试（否则死循环重读）
   });
   if (r.read) audit("ingest_candidates", r);
@@ -718,26 +739,30 @@ server.registerTool("memory_correct", {
   if (!row || row.status !== "active") return ok(`ERROR: id=${id} 不存在或已不可修正。`);
   if (row.version !== expected_version) return ok(`VERSION_CONFLICT: 当前 v${row.version} ≠ 期望 v${expected_version}。请重新 recall 后重试。`);
   const t = now();
+  let newIdNum = null;
   db.exec("BEGIN");
   try {
     db.prepare("UPDATE memories SET status='superseded' WHERE id=?").run(id);
     // v0.15：新版本继承 pinned 与 event_date（外审实锁：修正曾静默丢置顶；事件锚不得被修正推移）
-    db.prepare(
+    const ins = db.prepare(
       "INSERT INTO memories (version, kind, content, tags, source, status, supersedes, created_at, updated_at, pinned, event_date) VALUES (?,?,?,?,'agent-correct','active',?,?,?,?,?)"
     ).run(row.version + 1, row.kind, content.trim(), row.tags, id, row.created_at, t, row.pinned ? 1 : 0, row.event_date || String(row.created_at).slice(0, 10));
+    newIdNum = Number(ins.lastInsertRowid);
+    // v0.15.2 复核实锤：correct 内容提交却事件为零——事件必须与内容同事务
+    outboxInsert("correct", { old_id: id, new_id: newIdNum, version: row.version + 1, kind: row.kind, content: clip200(content), reason: reason.slice(0, 80) });
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
   }
-  const newId = db.prepare("SELECT last_insert_rowid() id").get().id;
+  const newId = newIdNum;
+  flushOutbox();
   const cvec = await embed(content.trim());
   if (cvec) db.prepare("UPDATE memories SET emb = ? WHERE id = ?").run(Buffer.from(cvec.buffer, cvec.byteOffset, cvec.byteLength), newId);
   const cvecEn = await embedEn(content.trim());
   if (cvecEn) db.prepare("UPDATE memories SET emb_en = ? WHERE id = ?").run(Buffer.from(cvecEn.buffer, cvecEn.byteOffset, cvecEn.byteLength), newId);
   regenerateCurrentMd(); rebuildEdgesSafe();
   audit("correct", { old_id: id, new_id: Number(newId), version: row.version + 1, reason: reason.slice(0, 80) });
-  announce("correct", { old_id: id, new_id: Number(newId), version: row.version + 1, kind: row.kind, content: clip200(content), reason: reason.slice(0, 80) });
   return ok(`OK: 新版本 id=${Number(newId)} v${row.version + 1}（取代 id=${id}）`);
 });
 
@@ -751,18 +776,28 @@ server.registerTool("memory_forget", {
   if (hard) {
     // v0.15.1 擦除契约（复核实锤旧版 hard 被 active/dormant 过滤挡住）：按 id 物理擦除任何生命周期状态的行。
     // 范围诚实声明：只删此行（含 FTS 索引，触发器联动）——不清理版本链其它行、队列文件、历史热流摘要。
-    db.prepare("DELETE FROM memories WHERE id=?").run(id);
+    db.exec("BEGIN");
+    try {
+      db.prepare("DELETE FROM memories WHERE id=?").run(id);
+      outboxInsert("forget", { id, kind: any.kind, reason: reason.slice(0, 80), hard: true, was: any.status }); // 删除事件不带原文（复核实锤）
+      db.exec("COMMIT");
+    } catch (e) { db.exec("ROLLBACK"); throw e; }
+    flushOutbox();
     audit("forget", { id, reason: reason.slice(0, 80), hard: true, was: any.status }); // 审计不含全文
-    announce("forget", { id, kind: any.kind, reason: reason.slice(0, 80), hard: true, was: any.status }); // 复核实锤：删除事件不得重新携带被删内容
     regenerateCurrentMd(); rebuildEdgesSafe();
     return ok(`OK: id=${id} 已物理擦除（原状态 ${any.status}）。范围：仅此行（版本链其它行/队列/历史热流摘要不在本次范围）。`);
   }
   if (any.status !== "active" && any.status !== "dormant")
     return ok(`ERROR: id=${id} 状态为 ${any.status}（保留供审计）。如需物理擦除请携带 hard=true 重试。`);
-  db.prepare("UPDATE memories SET status='deleted', updated_at=? WHERE id=?").run(now(), id);
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE memories SET status='deleted', updated_at=? WHERE id=?").run(now(), id);
+    outboxInsert("forget", { id, kind: any.kind, reason: reason.slice(0, 80), status: "deleted" }); // v0.15.2：删除事件一律不带原文（复核收窄声明）
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  flushOutbox();
   regenerateCurrentMd(); rebuildEdgesSafe();
   audit("forget", { id, reason: reason.slice(0, 80) });
-  announce("forget", { id, kind: any.kind, content: clip200(any.content), reason: reason.slice(0, 80) }); // 逻辑删除可逆，热流带摘要便于已开会话停止引用
   return ok(`OK: id=${id} 已删除（逻辑），不再出现在召回与 current.md；需彻底擦除可再次 forget 并 hard=true。`);
 });
 
@@ -789,21 +824,31 @@ server.registerTool("memory_pin", {
   if (!row) return ok(`ERROR: id=${id} 不存在。`);
   if (action === "wake") {
     if (row.status !== "dormant") return ok(`SKIP: id=${id} 状态为 ${row.status}，无需唤醒。`);
-    db.prepare("UPDATE memories SET status='active', updated_at=? WHERE id=?").run(now(), id);
+    db.exec("BEGIN");
+    try {
+      db.prepare("UPDATE memories SET status='active', updated_at=? WHERE id=?").run(now(), id);
+      outboxInsert("wake", { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) }); // v0.15.2：状态变更与事件同事务
+      db.exec("COMMIT");
+    } catch (e) { db.exec("ROLLBACK"); throw e; }
+    flushOutbox();
     regenerateCurrentMd(); rebuildEdgesSafe();
     audit("wake", { id, reason: reason.slice(0, 80) });
-    announce("wake", { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
     return ok(`OK: id=${id} 已唤醒，重新参与召回并重置衰减时钟。`);
   }
   const isPin = action === "pin";
   if (row.status !== "active" && !(isPin && row.status === "dormant"))
     return ok(`ERROR: id=${id} 状态为 ${row.status}，不可${isPin ? "置顶" : "取消置顶"}。`);
   const wakeByPin = isPin && row.status === "dormant"; // 置顶休眠记忆 = 同时唤醒（重置时钟）
-  if (wakeByPin) db.prepare("UPDATE memories SET pinned=1, status='active', updated_at=? WHERE id=?").run(now(), id);
-  else db.prepare("UPDATE memories SET pinned=? WHERE id=?").run(isPin ? 1 : 0, id); // pin/unpin 是管理操作，不重置衰减时钟
+  db.exec("BEGIN");
+  try {
+    if (wakeByPin) db.prepare("UPDATE memories SET pinned=1, status='active', updated_at=? WHERE id=?").run(now(), id);
+    else db.prepare("UPDATE memories SET pinned=? WHERE id=?").run(isPin ? 1 : 0, id); // pin/unpin 是管理操作，不重置衰减时钟
+    outboxInsert(action, { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) }); // v0.15.2：状态变更与事件同事务
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+  flushOutbox();
   regenerateCurrentMd(); rebuildEdgesSafe();
   audit(action, { id, reason: reason.slice(0, 80) });
-  announce(action, { id, kind: row.kind, content: clip200(row.content), reason: reason.slice(0, 80) });
   return ok(`OK: id=${id} ${isPin ? "已置顶（永不休眠" + (row.status === "dormant" ? "，并唤醒" : "") + "）" : "已取消置顶"}。`);
 });
 

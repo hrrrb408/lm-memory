@@ -218,6 +218,7 @@ function capture(session, config) {
 // 纪律：异常静默不抛宿主；per-session 字节 offset 幂等；无变更零成本（一次 stat）。
 const changesPath = () => path.join(MEM_DIR, "changes.jsonl");
 const refreshOffsets = new Map(); // sessionId -> 已消费字节 offset（首次 pre-step 建基线=当时文件尾）
+const seenEventIds = new Map(); // sessionId -> Set<eid>（v0.15.2：至少一次投递下跨 offset 重发的同一事件只应用一次）
 const INJECT_OPS = new Set(["remember", "correct", "forget", "pin", "unpin", "wake"]);
 const OP_LABEL = { remember: "新增", correct: "修正", forget: "删除", pin: "置顶", unpin: "取消置顶", wake: "唤醒" };
 const KIND_LABEL = { preference: "偏好", fact: "事实", procedure: "经验", todo: "待办", episode: "会话" };
@@ -277,7 +278,12 @@ function refreshHook(config) {
       if (offset === undefined) { refreshOffsets.set(sid, st.size); return decision; } // 本会话基线：此前的不算"新"
       const { changes, newOffset } = readNewChanges(offset);
       refreshOffsets.set(sid, newOffset); // 无论是否注入都推进，防重复注入死循环
-      const text = changes.length ? buildDeltaText(changes) : null;
+      // v0.15.2：稳定事件身份去重——outbox 至少一次投递，同一 eid 可能在两个不同 offset 重复出现
+      let seen = seenEventIds.get(sid);
+      if (!seen) { seen = new Set(); seenEventIds.set(sid, seen); }
+      const fresh = changes.filter((c) => !c.eid || !seen.has(c.eid));
+      for (const c of changes) if (c.eid) seen.add(c.eid);
+      const text = fresh.length ? buildDeltaText(fresh) : null;
       if (!text) return decision;
       log(`refresh push to session ${String(sid).slice(0, 8)}…: ${changes.length} changes`);
       return {
@@ -339,6 +345,7 @@ export default function apply(ctx, config) {
     ctx.on("session/disposed", (session) => {
       log(`event: session/disposed ${session?.id}`);
       try { refreshOffsets.delete(session?.id); } catch {}
+      try { seenEventIds.delete(session?.id); } catch {}
       capture(session, config);
     });
     // lm-refresh：每个 step 前检查记忆变更热流，有新记忆就注入 delta（config.refresh=false 关闭）

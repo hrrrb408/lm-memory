@@ -1,24 +1,24 @@
 #!/usr/bin/env node
-// locomo-run.mjs — LoCoMo × lm-memory 修正版 runner（v0.15.1：cat5 修入 + 源码身份固定）。
-// 相对 v0.15.0 的修正（2026-11-17 复核实锤）：
-//   1. cat5（adversarial）取题改用 `adversarial_answer` 字段——标准数据 446 道只有 2 道带 truthy `answer`，
-//      旧 `.filter(q => q.answer)` 实际把第五类整体排除；judge 同样改用正确答案字段
-//   2. startServer 内置：被测 server 硬编码为本仓库当前提交的 server/memory-server.mjs（旧版用外置
-//      lib 的 startServer，其内部硬编码旧部署路径，无法保证跑的是当前提交）
-//   3. 输出记录 serverPath / libPath（源码身份可追溯）；judge 原始输出逐题留档
-// 口径声明：官方 cat5 计分是弃答判定（输出含 'no information available' 即得分）；本 runner 仍用统一
-// LLM judge（以 adversarial_answer 为金标）并留原始输出供重判——两种口径不可混用，结果文件已标注。
+// locomo-run.mjs — LoCoMo × lm-memory 修正版 runner（v0.15.2：修复运行错误 + cat5 判分语义）。
+// 相对 v0.15.1 的修正（2026-11-17 复核实锤）：
+//   1. startServer 返回值补齐 clearAll——旧版局部定义未返回，首个对话即 ReferenceError
+//   2. cat5 判分语义修正：adversarial_answer 是「诱导错误作答的候选内容」，不是金标；
+//      官方 evaluation.py 对 cat5 检查回答是否表达无信息/未提及（弃答判定）。
+//      本 runner 对 cat5 单独判定：hypothesis 含无信息/未提及表述 → 正确，否则错误。
+//      其余类别沿用 gold=answer 的 LLM judge（includes('yes')，已注明脆弱性）。
+//   3. 输出记录 serverPath/libPath/dataPath + git HEAD（源码身份），cat5 记录 distractor 供复盘。
 // 用法: node locomo-run.mjs [对话数=3] [每类题数=5]
 //   env: LM_LOCOMO_DATA=locomo10.json；LM_LOCOMO_LIB=lib.mjs（judgePrompt/glm/summarizeSessionPack/ANSWER_PROMPT_V2）；
 //        LM_MEMORY_DIR 临时库目录（须通过 eval-dir-guard）；LM_LOCOMO_OUT 输出路径
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DatabaseSync } from "node:sqlite";
-import { rmEvalDir, assertSafeEvalDir } from "./eval-dir-guard.mjs";
+import { assertSafeEvalDir } from "./eval-dir-guard.mjs";
 
 const N_CONV = Number(process.argv[2] || 3);
 const PER_CAT = Number(process.argv[3] || 5);
@@ -27,6 +27,7 @@ const SERVER_PATH = fileURLToPath(new URL("../../server/memory-server.mjs", impo
 const DATA = process.env.LM_LOCOMO_DATA || path.join(os.homedir(), ".dsh/profiles/desktop/lm-bench/data/locomo10.json");
 const LIB = process.env.LM_LOCOMO_LIB || path.join(os.homedir(), ".dsh/profiles/desktop.crashed-20261102/lm-bench/lib.mjs");
 const MEM = process.env.LM_MEMORY_DIR || path.join(os.tmpdir(), "lm-bench", "tmp-locomo");
+const ABSTAIN_RE = /no information available|not mentioned|未提及|没有提及|没有相关信息|无法回答|不知道|无可奉告|没有提到/i; // 官方 cat5 弃答口径
 if (!fs.existsSync(DATA)) { console.error(`找不到数据文件: ${DATA}（可用 LM_LOCOMO_DATA 指定）`); process.exit(1); }
 if (!fs.existsSync(LIB)) { console.error(`找不到模型库 lib.mjs: ${LIB}（可用 LM_LOCOMO_LIB 指定）`); process.exit(1); }
 assertSafeEvalDir(MEM, { label: "LoCoMo 临时库" });
@@ -35,7 +36,7 @@ const { judgePrompt, glm, summarizeSessionPack, ANSWER_PROMPT_V2 } = await impor
 
 // 内置 startServer：MCP stdio 连当前提交的 server；clearAll 用 DB 直连清空（FTS 触发器联动）
 async function startServer(memDir) {
-  const c = new Client({ name: "locomo-run", version: "0.15.1" });
+  const c = new Client({ name: "locomo-run", version: "0.15.2" });
   await c.connect(new StdioClientTransport({
     command: process.execPath,
     args: [SERVER_PATH],
@@ -44,12 +45,14 @@ async function startServer(memDir) {
   const call = async (name, args = {}) => (await c.callTool({ name, arguments: args })).content[0].text;
   const db = new DatabaseSync(path.join(memDir, "memory.db"));
   const clearAll = () => db.exec("DELETE FROM memories"); // 触发器同步清 FTS
-  return { c, call, db };
+  return { c, call, db, clearAll }; // v0.15.2 修复：clearAll 必须对外返回（复核实锤 ReferenceError）
 }
-// cat5 金标在 adversarial_answer（标准数据无 answer 字段）；其余类别用 answer
-const goldOf = (q) => String((Number(q.category) === 5 ? (q.adversarial_answer ?? q.answer) : q.answer) ?? "").trim();
+// cat5 金标=弃答（adversarial_answer 是诱导项，不作金标）；其余类别用 answer
+const isCat5 = (q) => Number(q.category) === 5;
+const goldOf = (q) => (isCat5(q) ? "" : String(q.answer ?? "").trim());
+const distractorOf = (q) => (isCat5(q) ? String(q.adversarial_answer ?? "").trim() : "");
 
-const { c, call, db } = await startServer(MEM);
+const { c, call, db, clearAll } = await startServer(MEM);
 const t0 = Date.now();
 const results = [];
 
@@ -83,21 +86,30 @@ for (let ci = 0; ci < N_CONV; ci++) {
   const byCat = {};
   for (const q of conv.qa) (byCat[q.category] ??= []).push(q);
   for (const [cat, label] of Object.entries(OFFICIAL)) {
-    const take = (byCat[cat] ?? []).filter((q) => goldOf(q)).slice(0, PER_CAT); // cat5 依赖 adversarial_answer
+    const take = (byCat[cat] ?? []).filter((q) => (isCat5(q) ? !!distractorOf(q) : !!goldOf(q))).slice(0, PER_CAT); // cat5 需诱导项存在才是标准题
     for (const q of take) {
+      const cat5 = isCat5(q);
       const gold = goldOf(q);
+      const distractor = distractorOf(q);
       const raw = await call("memory_recall", { query: q.question, limit: 15 });
       let rows = []; try { rows = JSON.parse(raw); } catch {}
       const snippets = rows.map((r) => r.content).join("\n");
       const hypothesis = await glm([{ role: "user", content: ANSWER_PROMPT_V2(timelineStr, snippets, q.question) }], { maxTokens: 260 });
-      const judgeRaw = await glm([{ role: "user", content: judgePrompt("single-session-user", q.question, gold, hypothesis) }], { maxTokens: 64 });
-      const ok = judgeRaw.toLowerCase().includes("yes");
+      let ok, judgeRaw;
+      if (cat5) {
+        // v0.15.2 cat5 判分：正确弃答记对、诱导作答记错（官方口径；不用 adversarial_answer 做等价判分）
+        ok = ABSTAIN_RE.test(hypothesis);
+        judgeRaw = ok ? "abstention:correct" : "abstention:violated";
+      } else {
+        judgeRaw = await glm([{ role: "user", content: judgePrompt("single-session-user", q.question, gold, hypothesis) }], { maxTokens: 64 });
+        ok = judgeRaw.toLowerCase().includes("yes");
+      }
       let turnCov = null;
       if (q.evidence?.length) {
         const got = new Set(rows.map((r) => r.tags.match(/dia:([^,]+)/)?.[1]).filter(Boolean));
         turnCov = q.evidence.filter((d) => got.has(String(d))).length / q.evidence.length;
       }
-      results.push({ conv: conv.sample_id, category: Number(cat), catLabel: label, ok, judgeRaw: judgeRaw.slice(0, 300), turnCov, q: q.question.slice(0, 200), hypothesis: hypothesis.slice(0, 400), answer: gold.slice(0, 200) });
+      results.push({ conv: conv.sample_id, category: Number(cat), catLabel: label, ok, judgeRaw: judgeRaw.slice(0, 300), turnCov, q: q.question.slice(0, 200), hypothesis: hypothesis.slice(0, 400), answer: gold.slice(0, 200), distractor: distractor.slice(0, 200) });
       console.log(`${ok ? "✅" : "❌"} [conv${ci + 1} ${label}] turnCov=${turnCov === null ? "-" : turnCov.toFixed(2)} | ${hypothesis.slice(0, 66).replace(/\n/g, " ")}`);
     }
   }
@@ -107,7 +119,7 @@ for (let ci = 0; ci < N_CONV; ci++) {
 const acc = (a) => (a.length ? a.filter(Boolean).length / a.length : null);
 const byCatR = {};
 for (const r of results) (byCatR[r.catLabel] ??= []).push(r);
-console.log(`\n===== LoCoMo（前${N_CONV}段 · 官方类别映射 · v0.15.1 runner） =====`);
+console.log(`\n===== LoCoMo（前${N_CONV}段 · 官方类别映射 · v0.15.2 runner） =====`);
 const outByCat = {};
 for (const [k, arr] of Object.entries(byCatR)) {
   const a = acc(arr.map((r) => r.ok));
@@ -120,15 +132,16 @@ const covs = results.map((r) => r.turnCov).filter((v) => v !== null);
 const ev = covs.length ? { questions: covs.length, anyHitRate: +(covs.filter((v) => v > 0).length / covs.length).toFixed(4), meanCoverage: +(covs.reduce((s, v) => s + v, 0) / covs.length).toFixed(4), fullHitRate: +(covs.filter((v) => v === 1).length / covs.length).toFixed(4) } : null;
 console.log(`  总正确率: ${overall?.toFixed(3)} (${results.length} 题)`);
 if (ev) console.log(`  证据覆盖率: 任一命中 ${ev.anyHitRate} · 真均值 ${ev.meanCoverage} · 全齐 ${ev.fullHitRate}（${ev.questions} 题带标注）`);
-console.log(`  注意: judge/答题同一模型；cat5 采用 LLM judge（金标=adversarial_answer），与官方弃答判定口径不同；本分数无跨系统排名资格`);
+console.log(`  注意: 非 cat5 用 LLM judge（gold=answer）；cat5 用官方弃答判定；judge/答题同一模型；本分数无跨系统排名资格`);
+let gitHead = ""; try { gitHead = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim(); } catch {}
 const outFile = process.env.LM_LOCOMO_OUT || path.join(os.tmpdir(), "lm-bench", `result-LoCoMo-official-${new Date().toISOString().slice(0, 10)}.json`);
 fs.mkdirSync(path.dirname(outFile), { recursive: true });
 fs.writeFileSync(outFile, JSON.stringify({
-  benchmark: "LoCoMo-official-mapping", runner: "scripts/eval/locomo-run.mjs", runnerVersion: "0.15.1",
-  serverPath: SERVER_PATH, libPath: LIB, dataPath: DATA, // 源码身份
-  scoringNote: "cat5 gold=adversarial_answer, LLM judge (includes yes); official cat5 metric is abstention-based — 不混用",
+  benchmark: "LoCoMo-official-mapping", runner: "scripts/eval/locomo-run.mjs", runnerVersion: "0.15.2",
+  serverPath: SERVER_PATH, libPath: LIB, dataPath: DATA, gitHead, // 源码身份（HEAD 而非仅绝对路径）
+  scoringNote: "cat5 = abstention check (no information available / not mentioned); adversarial_answer is a distractor, NOT gold",
   overall, byCat: outByCat, evidence: ev, n: results.length, results,
 }, null, 1));
-console.log(`  结果: ${outFile}（含每题原始 category id、金标来源与 judge 原始输出）`);
+console.log(`  结果: ${outFile}（含每题原始 category id、金标来源、distractor 与 judge 原始输出）`);
 await c.close();
 process.exit(0);

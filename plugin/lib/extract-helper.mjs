@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 import { checkSecret, filterTextsForLLM } from "../../server/guards.mjs";
 
 const jobPath = process.argv[2];
@@ -147,12 +148,12 @@ let candidates = 0, rejected = 0, enqueueFailed = 0;
 for (const it of items) {
   if (!it?.content || !["preference", "fact", "procedure", "todo"].includes(it.kind)) continue;
   if (checkSecret(it.content)) { rejected++; audit("extract_rejected", { sessionId: job.sessionId, reason: "secret-like" }); continue; }
-  if (appendCandidate({ sessionId: job.sessionId, date: job.date, kind: it.kind, content: String(it.content).slice(0, 2000), tags: `auto,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date })) candidates++;
+  if (appendCandidate({ eid: randomUUID(), sessionId: job.sessionId, date: job.date, kind: it.kind, content: String(it.content).slice(0, 2000), tags: `auto,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date })) candidates++;
   else enqueueFailed++;
 }
 let summaryQueued = false;
 if (summary && !checkSecret(summary)) {
-  summaryQueued = appendCandidate({ sessionId: job.sessionId, date: job.date, kind: "episode", content: `会话摘要 ${job.date}：${summary}`, tags: `summary,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date });
+  summaryQueued = appendCandidate({ eid: randomUUID(), sessionId: job.sessionId, date: job.date, kind: "episode", content: `会话摘要 ${job.date}：${summary}`, tags: `summary,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date });
   if (summaryQueued) candidates++; else enqueueFailed++;
 }
 audit("extract_done", { sessionId: job.sessionId, llmItems: items.length, candidates, rejected, enqueueFailed, summary: summaryQueued ? 1 : 0, filteredIn: texts.length, filteredOut: (job.texts || []).length - texts.length });

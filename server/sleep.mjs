@@ -24,8 +24,9 @@ export function msUntilDormant(row, nowMs = Date.now()) {
 }
 
 // 执行一轮 sleep pass。db: node:sqlite DatabaseSync；audit(op, data) 复用服务端审计。
-// 返回 { checked, decayed, ids }。只处理 active 且未置顶的条目。
-export function runSleepPass(db, audit = () => {}) {
+// onDecay(ids)：状态更新的事务内回调——server 用它在同一事务写 outbox 事件（v0.15.2：
+// 复核实锤 sleep 的事件与状态变更不在同一事务）。返回 { checked, decayed, ids }。
+export function runSleepPass(db, audit = () => {}, onDecay = () => {}) {
   const rows = db.prepare(
     "SELECT id, kind, hit_count, pinned, updated_at, last_hit_at FROM memories WHERE status='active'"
   ).all();
@@ -37,8 +38,16 @@ export function runSleepPass(db, audit = () => {}) {
     ids.push(r.id);
   }
   if (ids.length) {
-    const upd = db.prepare("UPDATE memories SET status='dormant', updated_at=? WHERE id=? AND status='active'");
-    for (const id of ids) upd.run(t, id);
+    db.exec("BEGIN");
+    try {
+      const upd = db.prepare("UPDATE memories SET status='dormant', updated_at=? WHERE id=? AND status='active'");
+      for (const id of ids) upd.run(t, id);
+      onDecay(ids); // 调用方在事务内写事件（事件失败→整体回滚，状态不落）
+      db.exec("COMMIT");
+    } catch (e) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw e;
+    }
   }
   audit("sleep_pass", { checked: rows.length, decayed: ids.length, ids });
   return { checked: rows.length, decayed: ids.length, ids };

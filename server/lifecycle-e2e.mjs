@@ -85,6 +85,27 @@ t("superseded 历史行可 hard 擦除", f4.startsWith("OK") && !db().prepare("S
 const chLines = fs.readFileSync(path.join(MEM_DIR, "changes.jsonl"), "utf8").split("\n").filter(Boolean).reverse();
 const lastHard = chLines.find((l) => l.includes('"hard":true'));
 t("hard 删除事件不携带被删原文（复核实锤旧版重新复制内容）", !!lastHard && !("content" in JSON.parse(lastHard)), lastHard ? lastHard.slice(0, 90) : "none");
+const lastSoft = chLines.find((l) => l.includes('"op":"forget"') && !l.includes('"hard":true'));
+t("soft 删除事件不携带被删原文（v0.15.2 收窄）", !!lastSoft && !("content" in JSON.parse(lastSoft)), lastSoft ? lastSoft.slice(0, 90) : "none");
+
+// correct 事务原子性（复核实锤：correct 内容提交却事件为零）：
+// 注入 BEFORE INSERT trigger 让 op=correct 的 outbox 写入失败 → 内容变更必须一起回滚
+{
+  const inj = new DatabaseSync(DB);
+  inj.exec("CREATE TRIGGER inject_correct_outbox_fail BEFORE INSERT ON outbox WHEN NEW.op='correct' BEGIN SELECT RAISE(ABORT, 'injected'); END");
+  const r8 = await call("memory_remember", { content: "原子性测试：将被修正的条目", kind: "fact" });
+  const aid = idOf(r8);
+  const resp = await call("memory_correct", { id: aid, expected_version: 1, content: "原子性测试：修正后的条目" });
+  t("correct 事件失败 → 内容回滚（旧行仍 active、无新行）",
+    !String(resp).startsWith("OK") && db().prepare("SELECT status FROM memories WHERE id=?").get(aid)?.status === "active"
+    && db().prepare("SELECT 1 FROM memories WHERE content='原子性测试：修正后的条目'").get() === undefined,
+    String(resp).slice(0, 60));
+  t("correct 事件失败 → outbox 无 correct 事件", db().prepare("SELECT count(*) n FROM outbox WHERE op='correct'").get().n === 0);
+  inj.exec("DROP TRIGGER inject_correct_outbox_fail");
+  const resp2 = await call("memory_correct", { id: aid, expected_version: 1, content: "原子性测试：修正后的条目" });
+  t("移除注入后 correct 成功且事件在场", String(resp2).startsWith("OK") && db().prepare("SELECT count(*) n FROM outbox WHERE op='correct'").get().n === 0 && fs.readFileSync(path.join(MEM_DIR, "changes.jsonl"), "utf8").includes('"op":"correct"'));
+  inj.close();
+}
 
 // 7) recall 的 date 字段 = event_date（管理操作后不变）
 const rec = await call("memory_recall", { id: nid });
