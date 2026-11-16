@@ -23,6 +23,7 @@ lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记
 | **变更热流（v0.10）** | 写操作追加 `changes.jsonl`（带内容摘要），capture 插件经 `agent/pre-step` 向**已开会话**实时注入记忆 delta——不再"旧会话碰壁才发现新记忆" |
 | **索引注入层（v0.11）** | `current.md` 改索引形态：置顶条目全文 + 其余每条一行指针（#id 保留可定位），细节靠 `memory_recall`——注入层体积 90KB→约 20KB，对齐 Anthropic《The components of agent memory》"注入层必须小" |
 | **dream 去重扫描（v0.11）** | `dream.mjs` 纯函数 + `scripts/dream-dryrun.mjs` 只读 CLI：嵌入余弦扫疑似重复对（跨 kind），人审后合并——dreaming 的库内第一步（对照 transcript 校对属后续版本） |
+| **冲突消解扫描（v0.14）** | `conflict.mjs` 纯函数 + `scripts/conflict-dryrun.mjs` 只读 CLI + 随 sleep pass 自动巡检（结果经热流播报）：两级信号（取代性引用 / 相似+完结词）扫「旧条疑似已被新事实接棒」候选对——dreaming 的库内第二步。候选对粗筛误报率偏高（决策文体词密度），语义复核属 v0.15 规划 |
 | **记忆图谱（v0.12）** | `edges` 边表（similar/co_tag/ref 三类确定性边，高频 tag 防 supernode）+ `recall expand:true` 一跳关联扩展 + viewer 图谱页（零依赖 SVG 力导）。思路对齐 Mem0 native Graph Memory——不做类型化关系，纯共现/相似/引用推断 |
 | **viewer** | 本地管理页：搜索、版本历史、用户画像、**休眠馆**（唤醒/置顶）、命中统计 |
 | **跨平台** | 路径全部动态解析（DSH_HOME/HOME），macOS / Windows / Linux 通用 |
@@ -85,6 +86,25 @@ Claude Code 基线 200 行/25KB 索引）；dreaming 的价值在拿原始记录
 - **检索接入**：`memory_recall` 新增 `expand: true`——返回 `{hits, related}`，related 为命中条目的一跳邻居（带 `rel(w=权重) via #锚点` 建边依据）；默认 false 不破坏原数组格式
 - **viewer 图谱页**：`/api/graph` + 零依赖 SVG 力导（预跑 300 步降温出稳定布局，节点色=kind、半径=度数、边色=rel、悬停看全文、可拖拽整理）
 - **验证**：`graph-e2e.mjs` 14 断言（三类边建对/高频 tag 防 supernode/写后自动重建/expand 格式/forget 后边消失/默认格式兼容）
+
+## 冲突消解扫描（v0.14）
+
+**病灶**：一条「会话只在启动时加载记忆」的 fact 被同日上线的变更热流解决后，过时条目在库里躺了 7 天没人发现——缺的不是取代机制（schema 有 `superseded`/`supersedes` 与 `memory_correct` 修正链），是「主动发现旧条已过时」的定期扫描。人脑睡眠巩固不只归并相似记忆，还包括消解新旧冲突。
+
+**机制**（`conflict.mjs` 纯函数只读，随 sleep pass 自动巡检）：
+
+```
+sleep pass（工具/启动/12h 巡检三处共用）
+   └─ findConflictPairs(db) 两级信号扫候选对（只读，不处置）
+        ├─ supersede_signal — 语义相近（sim ≥ 0.85）+ 晚条带取代词 + 早条干净
+        └─ explicit_ref    — 取代性引用（引用点 ±40 字窗口内带取代语境；纯「相关：id=N」关联不算）
+             └─ 有候选 → audit("conflict_sweep") + announce 热流播报（≤3 对摘要）
+```
+
+- **处置**（人工/agent 复核后）：`memory_correct` 给旧条追加「【已过时 MM-DD】见 #新id」指针，或由新条正式接棒；教训叙事里的完结词不是状态声明，不要直接 `memory_forget`
+- **CLI**：`node scripts/conflict-dryrun.mjs [--sim=0.85]` 只读出报告
+- **已知边界**：候选对粗筛误报率偏高（记忆条目为高密度决策文体，「拍板/发布/已上线」词频高，词面信号必然过召回）——输出对象是人工复核或后续 LLM 语义复核（v0.15 规划），不要把候选对当结论
+- **验证**：`conflict-e2e.mjs` 15 断言（只读性/取代信号对/零相似引用对/双完结词不误报/deleted 排除/纯关联引用不出对/阈值独立）
 
 ## 架构
 

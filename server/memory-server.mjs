@@ -20,6 +20,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { rebuildEdges, neighbors } from "./graph.mjs";
 import { runSleepPass } from "./sleep.mjs";
+import { findConflictPairs } from "./conflict.mjs";
 import { embeddingCacheKey, rrfScore, boundedRecall, boundedIndex } from "./recall-utils.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
@@ -233,11 +234,29 @@ const clip200 = (s) => String(s ?? "").slice(0, 200);
 function announce(op, data = {}) {
   try { fs.appendFileSync(CHANGES_PATH, JSON.stringify({ ts: now(), op, ...data }) + "\n"); } catch {}
 }
-// sleep pass + 热流通知（三处调用共用：工具/启动/12h 巡检）
+// sleep pass + 冲突扫描 + 热流通知（三处调用共用：工具/启动/12h 巡检）
 function sleepPassAnnounced() {
   const r = runSleepPass(db, audit);
+  // v0.14 冲突消解扫描（人脑睡眠巩固的库内部分之二）：只读，疑似过时对只报告不处置，
+  // 复核由人/agent 走 memory_correct（annotate 指针 / supersede 接棒）。
+  let conflicts = null;
+  try {
+    conflicts = findConflictPairs(db, { maxPairs: 20 });
+    if (conflicts.total) {
+      audit("conflict_sweep", {
+        total: conflicts.total,
+        top: conflicts.pairs.slice(0, 5).map((p) => ({ old: p.old.id, new: p.new.id, sim: p.sim, signals: p.signals, suggestion: p.suggestion })),
+      });
+    }
+  } catch (e) { console.error("[memory] conflict_sweep error:", e.message); }
   if (r.decayed) { announce("dormant", { ids: r.ids }); regenerateCurrentMd(); rebuildEdgesSafe(); }
-  return r;
+  if (conflicts && conflicts.total) {
+    announce("conflict_sweep", {
+      total: conflicts.total,
+      pairs: conflicts.pairs.slice(0, 3).map((p) => ({ old: p.old.id, new: p.new.id, sim: p.sim, suggestion: p.suggestion })),
+    });
+  }
+  return { ...r, conflicts };
 }
 // v0.12 衍生数据统一刷新：注入层索引 + 图谱边表（规模数千条内全量重建为毫秒级，先正确后增量）
 function rebuildEdgesSafe() {
@@ -623,11 +642,14 @@ server.registerTool("memory_pin", {
 
 server.registerTool("memory_sleep", {
   title: "整理",
-  description: "手动执行一轮 sleep-time 整理：长期未被召回且未置顶的记忆转入休眠（可唤醒、可审计）。",
+  description: "手动执行一轮 sleep-time 整理：长期未被召回且未置顶的记忆转入休眠（可唤醒、可审计）；顺带跑一轮冲突消解扫描（v0.14，只读），疑似过时对经热流播报。",
   inputSchema: {},
 }, async () => {
   const r = sleepPassAnnounced();
-  return ok(`OK: 检查 ${r.checked} 条，休眠 ${r.decayed} 条${r.ids.length ? `（ids: ${r.ids.join(",")}）` : ""}。`);
+  const cf = r.conflicts && r.conflicts.total
+    ? `；冲突扫描 ${r.conflicts.total} 对疑似过时（详查: node scripts/conflict-dryrun.mjs）`
+    : "；冲突扫描 0 对";
+  return ok(`OK: 检查 ${r.checked} 条，休眠 ${r.decayed} 条${r.ids.length ? `（ids: ${r.ids.join(",")}）` : ""}${cf}。`);
 });
 
 const transport = new StdioServerTransport();
