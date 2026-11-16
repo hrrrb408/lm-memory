@@ -343,19 +343,44 @@ function spawnHelperJob(jobFile) {
   ch.unref();
   return true;
 }
+// v0.16.3 统一派发入口（第十轮复核实锤）：禁外发检查、登记、领取、重试上限、spawn 全部收敛到
+// dispatchJob()——通知入口与恢复器只调用它，不再各自维护派发策略（此前通知入口漏了禁外发检查
+// 与重试上限，同一任务经不同入口行为不一致）。
+const MAX_ATTEMPTS = 5;
+function dispatchJob(jobFile, sid, rev) {
+  if (process.env.LM_REMOTE_DISABLED === "1") { // 禁外发在领取之前检查（任务保留在 job 文件里，恢复远程后可重跑）
+    audit("dispatch_blocked_remote_disabled", { sessionId: String(sid), revision: String(rev) });
+    return "blocked";
+  }
+  ledgerRegister(sid, rev);
+  const prior = db.prepare("SELECT status FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev);
+  if (prior?.status === "done" || prior?.status === "failed") return "terminal";
+  if (!ledgerClaim(sid, rev, SERVER_OWNER)) return "busy"; // 租约内他人在跑 / 已终态
+  const after = db.prepare("SELECT attempts FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev);
+  if ((after?.attempts ?? 0) > MAX_ATTEMPTS) { // 领取后超限（第 6 次）才判耗尽——第 5 次有效执行不被归档
+    try {
+      const failedDir = path.join(MEM_DIR, "extraction-jobs", "failed");
+      fs.mkdirSync(failedDir, { recursive: true });
+      fs.renameSync(jobFile, path.join(failedDir, path.basename(jobFile)));
+    } catch {}
+    db.prepare("UPDATE extract_jobs SET status='failed', last_note='attempts-exceeded', updated_at=? WHERE session_id=? AND revision=?").run(now(), sid, rev);
+    audit("extract_job_failed_terminal", { sessionId: sid, revision: rev, attempts: after.attempts });
+    return "exhausted";
+  }
+  if (!spawnHelperJob(jobFile)) { // helper 缺失：归还领取待下次
+    db.prepare("UPDATE extract_jobs SET status='pending', attempts=MAX(0, attempts-1), updated_at=? WHERE session_id=? AND revision=?").run(now(), sid, rev);
+    return "no-helper";
+  }
+  audit("job_dispatched", { sessionId: sid, revision: rev });
+  return "spawned";
+}
 function ingestPendingJobs() {
   const r = consumeQueueFile(PENDING_JOBS, (rec) => {
     if (!rec?.sessionId || !rec?.rev || !rec?.jobFile) return true; // 坏通知丢弃
     const jobFile = path.join(MEM_DIR, "extraction-jobs", path.basename(String(rec.jobFile)));
     if (!fs.existsSync(jobFile)) return true; // job 已被处理/清理（通知重放）→ 终态
-    ledgerRegister(rec.sessionId, rec.rev);
-    if (!ledgerClaim(rec.sessionId, rec.rev, SERVER_OWNER)) return true; // 已 done/failed 或租约内他人在跑 → 消费通知（恢复器兜底）
-    if (!spawnHelperJob(jobFile)) { // helper 缺失：归还领取（attempts-1）待下次
-      db.prepare("UPDATE extract_jobs SET status='pending', attempts=MAX(0, attempts-1), updated_at=? WHERE session_id=? AND revision=?").run(now(), rec.sessionId, rec.rev);
-      return false;
-    }
-    audit("job_dispatched", { sessionId: rec.sessionId, revision: rec.rev });
-    return true;
+    const outcome = dispatchJob(jobFile, rec.sessionId, rec.rev);
+    return outcome !== "no-helper"; // helper 缺失 → 重试（其余终态消费通知）
   });
   if (r.read) audit("ingest_pending_jobs", r);
   return 0;
@@ -1009,29 +1034,11 @@ void (async () => { // 提炼任务恢复器：登记遗留 job → 原子领取
       const cand = fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).map((f) => path.join(jobsDir, f))
         .filter((f) => Date.now() - fs.statSync(f).mtimeMs > 120000).slice(0, 3);
       if (!cand.length) return;
-      const failedDir = path.join(jobsDir, "failed");
       let spawned = 0;
       for (const jobFile of cand) {
         let sid = path.basename(jobFile), rev = "";
         try { const j = JSON.parse(fs.readFileSync(jobFile, "utf8")); sid = j.sessionId; rev = j.rev || ""; } catch {}
-        ledgerRegister(sid, rev || "unknown");
-        const prior = db.prepare("SELECT status FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev || "unknown");
-        if (prior?.status === "done" || prior?.status === "failed") continue; // 已终态（job 文件残留）不重跑
-        // v0.16.2（第九轮复核实锤）：先原子领取确认「任务可接管」——有效 running 租约内抢不到 → 跳过，绝不误杀在跑任务。
-        if (!ledgerClaim(sid, rev || "unknown", SERVER_OWNER)) continue;
-        const after = db.prepare("SELECT attempts FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev || "unknown");
-        if ((after?.attempts ?? 0) > MAX_ATTEMPTS) { // 领取后超限（第 6 次）才算耗尽——第 5 次有效执行不被归档
-          fs.mkdirSync(failedDir, { recursive: true });
-          try { fs.renameSync(jobFile, path.join(failedDir, path.basename(jobFile))); } catch {}
-          db.prepare("UPDATE extract_jobs SET status='failed', last_note='attempts-exceeded', updated_at=? WHERE session_id=? AND revision=?").run(now(), sid, rev || "unknown");
-          audit("extract_job_failed_terminal", { sessionId: sid, revision: rev, attempts: after.attempts });
-          continue;
-        }
-        if (!spawnHelperJob(jobFile)) { // helper 缺失：归还领取
-          db.prepare("UPDATE extract_jobs SET status='pending', attempts=MAX(0, attempts-1), updated_at=? WHERE session_id=? AND revision=?").run(now(), sid, rev || "unknown");
-          continue;
-        }
-        spawned++;
+        if (dispatchJob(jobFile, sid, rev || "unknown") === "spawned") spawned++; // v0.16.3：与通知入口共用同一派发入口
       }
       if (spawned) audit("orphan_jobs_respawn", { count: spawned, by: label, owner: SERVER_OWNER });
     } catch (e) { console.error("[memory] orphan respawn:", e.message); }

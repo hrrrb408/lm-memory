@@ -16,10 +16,18 @@ import { fileURLToPath } from "node:url";
 const libDir = () => path.dirname(fileURLToPath(import.meta.url));
 
 let MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
-const PENDING = path.join(MEM_DIR, "pending-episodes.jsonl");
-const MARKER = path.join(MEM_DIR, "captured-sessions.jsonl");
+// v0.16.3（第十轮复核实锤：config.memoryDir 只改 MEM_DIR，PENDING/MARKER 在模块加载时固定）——
+// 队列/标记路径在最终配置确定后统一解析，配置目录切换时同步重置去重索引。
+let PENDING = path.join(MEM_DIR, "pending-episodes.jsonl");
+let MARKER = path.join(MEM_DIR, "captured-sessions.jsonl");
 const captureIndex = new Map(); // sessionId -> 文本指纹 hash（null = 旧版无指纹记录）
 let captureIndexLoaded = false;
+function resolvePaths() {
+  PENDING = path.join(MEM_DIR, "pending-episodes.jsonl");
+  MARKER = path.join(MEM_DIR, "captured-sessions.jsonl");
+  captureIndex.clear();
+  captureIndexLoaded = false; // 目录切换后从新的 captured-sessions.jsonl 重建索引
+}
 
 const log = (msg) => { try { console.error(`[lm-capture] ${msg}`); } catch {} };
 
@@ -308,7 +316,7 @@ function refreshHook(config) {
 
 export default function apply(ctx, config) {
   try {
-    if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
+    if (config?.memoryDir) { MEM_DIR = String(config.memoryDir); resolvePaths(); }
     // MCP 稳定启动器：每次宿主启动重写，路径只依赖 HOME（见 writeServerShim 注释）；allowRemote 策略随 shim 传播
     writeServerShim(config);
     // viewer 自启（config.viewer = 端口号）：先探测/升级旧版 viewer（v0.10），再确保有活的最新版

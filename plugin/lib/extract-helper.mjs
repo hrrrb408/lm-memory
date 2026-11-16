@@ -59,6 +59,13 @@ if (!KEY) { // 无 key：优雅降级——跳过提炼（检索不受影响）�
   console.error(`[extract] ${job.sessionId}: 无 ${KEY_ENV}（env 或 ~/.dsh/.credentials.yaml），跳过 LLM 提炼`);
   process.exit(0);
 }
+// v0.16.3 网络入口防守（第十轮复核实锤：禁外发开关曾被通知入口绕过）：任何 spawn 路径拉起的 helper
+// 都在这里兜底——禁外发时不外呼、保留 job（恢复远程后可重跑），绝不因上游漏检而发请求。
+if (process.env.LM_REMOTE_DISABLED === "1") {
+  audit("extract_skipped_remote_disabled", { sessionId: job.sessionId, model: MODEL });
+  console.error(`[extract] ${job.sessionId}: LM_REMOTE_DISABLED=1，跳过外呼（job 保留）`);
+  process.exit(0);
+}
 
 async function llm(prompt) {
   // v0.16 失败感知（第七轮外审实锤：LLM 连续失败返回空串 → items=[] → exit 0 删任务 = 永久漏记）：

@@ -152,6 +152,24 @@ const rej = { kind: "reject", reason: "x" };
 const rejOut = await preStep({ agent: { session: { id: "sess-A" } }, signal: { aborted: false } }, async () => rej);
 ok(rejOut === rej || rejOut?.kind === "reject", "reject 原样透传");
 
+console.log("== 14. config.memoryDir 影响全部路径（v0.16.3：PENDING/MARKER 模块加载时固定曾去原目录）==");
+{
+  const fakeSession = {
+    id: "sess-path",
+    header: { cwd: "/tmp" },
+    ownEvents: () => [
+      { type: "user/message", data: { source: { kind: "user" }, content: [{ type: "text", text: "路径测试一" }] } },
+      { type: "user/message", data: { source: { kind: "user" }, content: [{ type: "text", text: "路径测试二" }] } },
+    ],
+  };
+  handlers["session/created"][0](fakeSession); // 注册会话对象（handlers 存的是数组）
+  handlers["workspace/session-stop"][0]({ sessionId: "sess-path" }); // 触发 capture
+  ok(fs.existsSync(path.join(TMP, "pending-episodes.jsonl")), "采集卡写入配置目录");
+  ok(fs.existsSync(path.join(TMP, "captured-sessions.jsonl")), "去重标记写入配置目录");
+  ok(fs.existsSync(path.join(TMP, "pending-jobs.jsonl")), "派发通知写入配置目录");
+  ok(fs.existsSync(path.join(TMP, "extraction-jobs")) && fs.readdirSync(path.join(TMP, "extraction-jobs")).some((f) => f.endsWith(".json")), "job 文件写入配置目录");
+}
+
 await client.close();
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log(`\n=== ${passed} passed, ${failed} failed ===`);

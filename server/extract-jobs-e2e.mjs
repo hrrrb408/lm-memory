@@ -39,10 +39,12 @@ const t = (name, cond, extra = "") => { cond ? pass++ : fail++; console.log((con
 // —— mock LLM：可切换模式；记录最近请求体（验证窗口内容用）——
 // healthy: 正常 | broken: HTTP 500 | truncated: 200 + finish_reason=length + 截断 JSON | zero: 合法 [] + 空摘要
 let mockMode = "healthy";
+let mockHits = 0; // 禁外发断言用：统计模型请求次数
 let lastBody = "";
 const mock = http.createServer((req, res) => {
   let body = ""; req.on("data", (ch) => (body += ch));
   req.on("end", () => {
+    mockHits++;
     lastBody = body;
     if (mockMode === "broken") { res.writeHead(500); return res.end("broken"); }
     if (mockMode === "truncated") { // 第八轮复核实锤：HTTP 200 + length + 截断 JSON 曾被当成功
@@ -247,6 +249,34 @@ t("插件不再直接 spawn helper（统一走 server 登记+领取入口）", !
   await startSecond();
   const dead = db().prepare("SELECT status FROM extract_jobs WHERE revision='2026-11-17T04:01:00.000Z'").get();
   t("租约过期后才判耗尽（第 6 次领取 → failed）", dead?.status === "failed", JSON.stringify(dead));
+}
+
+// —— 场景 6e：禁外发在通知入口也生效（第十轮复核实锤：ingestPendingJobs 未检查 LM_REMOTE_DISABLED）——
+{
+  const blockedJob = path.join(jobsDir, "s-blocked-2026-11-17T04-02-00-000Z.json");
+  fs.writeFileSync(blockedJob, JSON.stringify({ sessionId: "s-blocked", rev: "2026-11-17T04:02:00.000Z", date: "2026-11-17", cwd: "", texts: ["禁外发测试甲", "禁外发测试乙"], llm: { model: "mock", baseURL: `http://127.0.0.1:${mockPort}/v1`, apiKeyEnv: "LM_TEST_KEY" } }));
+  fs.appendFileSync(path.join(MEM_DIR, "pending-jobs.jsonl"), JSON.stringify({ sessionId: "s-blocked", rev: "2026-11-17T04:02:00.000Z", jobFile: path.basename(blockedJob) }) + "\n");
+  const hitsBefore = mockHits;
+  const c3 = new Client({ name: "remote-off-e2e", version: "0.16" });
+  await c3.connect(new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL("./memory-server.mjs", import.meta.url))], env: { ...process.env, LM_MEMORY_DIR: MEM_DIR, LM_EMBED: "0", LM_REMOTE_DISABLED: "1" } }));
+  await (await c3.callTool({ name: "memory_recall", arguments: { query: "禁外发测试" } }));
+  await new Promise((r) => setTimeout(r, 1200)); // 给可能的异步 spawn 留窗口
+  await c3.close();
+  t("禁外发：通知入口不派发（mock 0 请求）", mockHits === hitsBefore, `hits=${mockHits - hitsBefore}`);
+  t("禁外发：job 保留待远程恢复后重跑", fs.existsSync(blockedJob));
+  t("禁外发：任务不进入 running（未领取）", !db().prepare("SELECT 1 FROM extract_jobs WHERE revision='2026-11-17T04:02:00.000Z' AND status='running'").get());
+}
+
+// —— 场景 6f：通知入口与恢复器同一重试上限（第十轮复核实锤：通知入口可启动第 6 次并 done）——
+{
+  const exJob = path.join(jobsDir, "s-exhaust-2026-11-17T04-03-00-000Z.json");
+  fs.writeFileSync(exJob, JSON.stringify({ sessionId: "s-exhaust", rev: "2026-11-17T04:03:00.000Z", date: "2026-11-17", cwd: "", texts: ["耗尽测试甲", "耗尽测试乙"], llm: { model: "mock", baseURL: `http://127.0.0.1:${mockPort}/v1`, apiKeyEnv: "LM_TEST_KEY" } }));
+  dbw().prepare("INSERT OR REPLACE INTO extract_jobs (session_id, revision, status, attempts, owner, last_note, updated_at) VALUES ('s-exhaust','2026-11-17T04:03:00.000Z','running',5,'srv-other',NULL,?)").run(new Date(Date.now() - 11 * 60 * 1000).toISOString()); // 租约过期
+  fs.appendFileSync(path.join(MEM_DIR, "pending-jobs.jsonl"), JSON.stringify({ sessionId: "s-exhaust", rev: "2026-11-17T04:03:00.000Z", jobFile: path.basename(exJob) }) + "\n");
+  await call("memory_recall", { query: "耗尽测试" });
+  const ex = db().prepare("SELECT status, attempts FROM extract_jobs WHERE revision='2026-11-17T04:03:00.000Z'").get();
+  t("通知入口同样执行重试上限（第 6 次 → failed）", ex?.status === "failed", JSON.stringify(ex));
+  t("耗尽任务归档到 failed/ 目录", fs.existsSync(path.join(jobsDir, "failed", path.basename(exJob))));
 }
 
 // —— 场景 7：viewer Origin 边界 ——
