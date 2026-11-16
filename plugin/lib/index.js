@@ -157,6 +157,8 @@ function dispatchExtraction(session, texts, config) {
     const jobFile = path.join(jobsDir, `${session.id}.json`);
     fs.writeFileSync(jobFile, JSON.stringify({
       sessionId: session.id,
+      rev: new Date().toISOString(), // v0.15.3 来源 revision：job 创建时固定——重跑同 job 复用同一 rev，
+      // 候选 eid 与版本序都从它派生（复核实锤：helper 每次跑换新身份+刷新时间，旧 job 重跑会退回新摘要）
       date: new Date().toISOString().slice(0, 10),
       cwd: session.header?.cwd ?? "",
       texts,
@@ -278,11 +280,14 @@ function refreshHook(config) {
       if (offset === undefined) { refreshOffsets.set(sid, st.size); return decision; } // 本会话基线：此前的不算"新"
       const { changes, newOffset } = readNewChanges(offset);
       refreshOffsets.set(sid, newOffset); // 无论是否注入都推进，防重复注入死循环
-      // v0.15.2：稳定事件身份去重——outbox 至少一次投递，同一 eid 可能在两个不同 offset 重复出现
+      // v0.15.3：稳定事件身份去重——单次遍历内「检查即登记」，同批重复 eid 与跨 offset 重发都只应用一次
+      // （复核实锤：先过滤整批再统一登记，批内两条相同 eid 会漏网注入两次）
       let seen = seenEventIds.get(sid);
       if (!seen) { seen = new Set(); seenEventIds.set(sid, seen); }
-      const fresh = changes.filter((c) => !c.eid || !seen.has(c.eid));
-      for (const c of changes) if (c.eid) seen.add(c.eid);
+      const fresh = [];
+      for (const c of changes) {
+        if (!c.eid || !seen.has(c.eid)) { fresh.push(c); if (c.eid) seen.add(c.eid); }
+      }
       const text = fresh.length ? buildDeltaText(fresh) : null;
       if (!text) return decision;
       log(`refresh push to session ${String(sid).slice(0, 8)}…: ${changes.length} changes`);

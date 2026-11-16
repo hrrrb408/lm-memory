@@ -114,9 +114,13 @@ const mock = http.createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
-    const wantsJson = body.includes("提炼");
+    const mark = (body.match(/R[12]MARK/) || [])[0] || null; // 重跑场景：按输入 mark 返回可区分的确定性输出
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ choices: [{ message: { content: wantsJson ? '[{"kind":"fact","content":"MOCK_HELPER_CANDIDATE 故障注入候选"}]' : "MOCK_HELPER_SUMMARY 故障注入摘要" } }] }));
+    const factContent = mark ? `FACT_${mark} 稳定身份测试事实` : "MOCK_HELPER_CANDIDATE 故障注入候选";
+    const summaryText = mark ? `SUMMARY_${mark} 稳定身份测试摘要` : "MOCK_HELPER_SUMMARY 故障注入摘要";
+    res.end(JSON.stringify({
+      choices: [{ message: { content: body.includes("提炼") ? `[{"kind":"fact","content":"${factContent}"}]` : summaryText } }],
+    }));
   });
 });
 await new Promise((r) => mock.listen(0, "127.0.0.1", r));
@@ -130,8 +134,8 @@ const helperPath = fileURLToPath(new URL("../plugin/lib/extract-helper.mjs", imp
 const helperEnv = { ...process.env, LM_MEMORY_DIR: MEM_DIR, LM_TEST_KEY: "test", LM_EMBED: "0" };
 // 注意：必须用异步 spawn——spawnSync 会阻塞本进程事件循环，mock server 无法应答 helper 的 fetch。
 // 故障面：候选队列是已存在文件，append 只需文件写权限——目录 chmod 挡不住，必须 chmod 文件本身。
-const runHelper = () => new Promise((resolve) => {
-  const ch = spawn(process.execPath, [helperPath, jobPath], { env: helperEnv });
+const runHelper = (jp = jobPath) => new Promise((resolve) => {
+  const ch = spawn(process.execPath, [helperPath, jp], { env: helperEnv });
   let done = false;
   const timer = setTimeout(() => { if (!done) { done = true; ch.kill("SIGKILL"); resolve({ status: null, signal: "TIMEOUT" }); } }, 60000);
   ch.on("exit", (code, signal) => { if (!done) { done = true; clearTimeout(timer); resolve({ status: code, signal }); } });
@@ -146,6 +150,37 @@ t("helper 入队失败候选未落盘", !fs.readFileSync(queuePath, "utf8").incl
 const rOk = await runHelper();
 t("恢复权限重跑成功且 job 清理", rOk.status === 0 && !fs.existsSync(jobPath), `exit=${rOk.status} signal=${rOk.signal}`);
 t("重跑候选已落盘", fs.existsSync(queuePath) && fs.readFileSync(queuePath, "utf8").includes("MOCK_HELPER_CANDIDATE"));
+
+// 旧 job 重跑不回退（v0.15.3 复核实锤：helper 每次跑换新 eid+刷新时间 → 旧 job 重跑退回新摘要）：
+// R1(rev=T1) 消费 → R2(rev=T2>T1, 同 session) 消费（B 取代 A）→ 重跑 R1 → active 必须仍是 B
+{
+  const mkJob = (name, rev, mark) => {
+    const p = path.join(jobsDir, `${name}.json`);
+    fs.writeFileSync(p, JSON.stringify({ sessionId: "s-rev-test", rev, date: "2026-11-17", cwd: "", texts: [`前文 ${mark}`, `后文（以此为准）${mark}`], llm: { model: "mock", baseURL: `http://127.0.0.1:${mockPort}/v1`, apiKeyEnv: "LM_TEST_KEY" } }));
+    return p;
+  };
+  const T1 = "2026-11-17T01:00:00.000Z", T2 = "2026-11-17T02:00:00.000Z";
+  const j1 = mkJob("rev-r1", T1, "R1MARK"), j2 = mkJob("rev-r2", T2, "R2MARK");
+  const r1run = await runHelper(j1);
+  t("R1 job 运行成功", r1run.status === 0, `exit=${r1run.status}`);
+  await call("memory_recall", { query: "触发 R1 消费" });
+  t("R1 摘要已入库", rows("SELECT 1 FROM memories WHERE content LIKE '%SUMMARY_R1MARK%' AND status='active'").length === 1);
+  const r2run = await runHelper(j2);
+  t("R2 job 运行成功", r2run.status === 0, `exit=${r2run.status}`);
+  await call("memory_recall", { query: "触发 R2 消费" });
+  t("R2 摘要取代 R1（active=B）", rows("SELECT 1 FROM memories WHERE status='active' AND tags LIKE 'summary,%' AND tags LIKE '%session:s-rev-test%'").length === 1
+    && rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_R2MARK%'").length === 1
+    && rows("SELECT 1 FROM memories WHERE status='superseded' AND content LIKE '%SUMMARY_R1MARK%'").length === 1);
+  // 保留 R1 的 job 副本（模拟「入队成功但 job 清理失败」的遗留），然后重跑
+  fs.writeFileSync(j1, JSON.stringify({ sessionId: "s-rev-test", rev: T1, date: "2026-11-17", cwd: "", texts: ["前文 R1MARK", "后文（以此为准）R1MARK"], llm: { model: "mock", baseURL: `http://127.0.0.1:${mockPort}/v1`, apiKeyEnv: "LM_TEST_KEY" } }));
+  const r1rerun = await runHelper(j1);
+  t("R1 重跑成功（job 被清理）", r1rerun.status === 0 && !fs.existsSync(j1), `exit=${r1rerun.status}`);
+  await call("memory_recall", { query: "触发 R1 重放消费" });
+  t("重跑后 active 仍为 B（不回退到 A）", rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_R2MARK%'").length === 1
+    && rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_R1MARK%'").length === 0, JSON.stringify(rows("SELECT content, status FROM memories WHERE content LIKE '%SUMMARY_%'")));
+  t("重跑后摘要版本数仍为 2（不新增版本）", rows("SELECT 1 FROM memories WHERE tags LIKE '%session:s-rev-test%' AND kind='episode'").length === 2);
+  t("重跑的 fact 候选被稳定 eid 拦下（FACT_R1MARK 仍 1 条）", rows("SELECT 1 FROM memories WHERE content LIKE '%FACT_R1MARK%'").length === 1);
+}
 await new Promise((r) => mock.close(r));
 
 console.log(`\n${pass} passed, ${fail} failed`);

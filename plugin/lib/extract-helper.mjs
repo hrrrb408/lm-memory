@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { checkSecret, filterTextsForLLM } from "../../server/guards.mjs";
 
 const jobPath = process.argv[2];
@@ -139,21 +139,25 @@ let summary = "";
 try { summary = (await llm(summaryPrompt)).trim().replace(/^["'「『]|["'」』]$/g, "").slice(0, 500); } catch {}
 
 // —— 产出候选（不碰库）：追加 pending-memories.jsonl，server 统一提交入口消费。
-// 事件锚 eventDate=会话日期（job.date）；凭据模式在出队前再拦一道（防御纵深，与 server 同源）。
-// 故障不变量（复核实锤旧版：追加失败仍删 job → 候选未落盘就丢失重试依据）：
-// 任一候选追加失败 → 保留 job 文件并以非零码退出；server 孤儿回收（>2 分钟）会重跑，
-// 幂等由统一提交入口的精确查重保证。
-const appendCandidate = (rec) => { try { fs.appendFileSync(CANDIDATES, JSON.stringify(rec) + "\n"); return true; } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; } };
+// v0.15.3 身份连续性（复核实锤：旧 job 重跑换新 eid+刷新时间 → 退回新摘要）：
+//   rev   = job 创建时固定的来源 revision（派发方写入；旧 job 缺失时兜底为当前时间）
+//   eid   = sha256(sessionId|rev|kind|content) 确定性派生——同一 job 重跑、LLM 输出不变 → 同一 eid，
+//           server 侧 meta 记录直接丢弃；LLM 输出变了 → eid 变，但 rev 更旧，版本序约束仍然拦下
+//   capturedAt = rev（版本序锚=派发时间，非提炼完成时间）；extractedAt = 完成时间仅审计
+// 凭据模式出队前再拦一道（防御纵深，与 server 同源）。
+const JOB_REV = job.rev || new Date().toISOString(); // 旧任务文件无 rev：一次性兜底
+const candEid = (kind, content) => "h-" + createHash("sha256").update(`${job.sessionId}|${JOB_REV}|${kind}|${content}`).digest("hex").slice(0, 24);
+const appendCandidate = (kind, content, tags) => { try { fs.appendFileSync(CANDIDATES, JSON.stringify({ eid: candEid(kind, content), sessionId: job.sessionId, date: job.date, kind, content: String(content).slice(0, 2000), tags, capturedAt: JOB_REV, extractedAt: new Date().toISOString(), eventDate: job.date }) + "\n"); return true; } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; } };
 let candidates = 0, rejected = 0, enqueueFailed = 0;
 for (const it of items) {
   if (!it?.content || !["preference", "fact", "procedure", "todo"].includes(it.kind)) continue;
   if (checkSecret(it.content)) { rejected++; audit("extract_rejected", { sessionId: job.sessionId, reason: "secret-like" }); continue; }
-  if (appendCandidate({ eid: randomUUID(), sessionId: job.sessionId, date: job.date, kind: it.kind, content: String(it.content).slice(0, 2000), tags: `auto,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date })) candidates++;
+  if (appendCandidate(it.kind, it.content, `auto,session:${job.sessionId}`)) candidates++;
   else enqueueFailed++;
 }
 let summaryQueued = false;
 if (summary && !checkSecret(summary)) {
-  summaryQueued = appendCandidate({ eid: randomUUID(), sessionId: job.sessionId, date: job.date, kind: "episode", content: `会话摘要 ${job.date}：${summary}`, tags: `summary,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date });
+  summaryQueued = appendCandidate("episode", `会话摘要 ${job.date}：${summary}`, `summary,session:${job.sessionId}`);
   if (summaryQueued) candidates++; else enqueueFailed++;
 }
 audit("extract_done", { sessionId: job.sessionId, llmItems: items.length, candidates, rejected, enqueueFailed, summary: summaryQueued ? 1 : 0, filteredIn: texts.length, filteredOut: (job.texts || []).length - texts.length });

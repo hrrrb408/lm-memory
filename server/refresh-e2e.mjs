@@ -92,6 +92,18 @@ fs.appendFileSync(path.join(TMP, "changes.jsonl"), JSON.stringify({ ts: new Date
 r = await step();
 ok(r.injected?.includes("转入休眠") && r.injected?.includes("3 条"), "dormant 计数折叠", r.injected ?? "null");
 
+console.log("== 8b. 同批重复 eid 只注入一次（v0.15.3：检查即登记） ==");
+fs.appendFileSync(path.join(TMP, "changes.jsonl"),
+  JSON.stringify({ ts: new Date().toISOString(), op: "remember", eid: "dup-e2e-001", id: 900, kind: "fact", content: "DUP-EID 批内去重条目" }) + "\n" +
+  JSON.stringify({ ts: new Date().toISOString(), op: "remember", eid: "dup-e2e-001", id: 900, kind: "fact", content: "DUP-EID 批内去重条目" }) + "\n");
+r = await step();
+const occurrences = (r.injected?.match(/DUP-EID 批内去重条目/g) || []).length;
+ok(r.injected !== null && occurrences === 1, "同批两条相同 eid 只注入一次", `occurrences=${occurrences}`);
+// 跨批重发同 eid 也被 seen 挡住
+fs.appendFileSync(path.join(TMP, "changes.jsonl"), JSON.stringify({ ts: new Date().toISOString(), op: "remember", eid: "dup-e2e-001", id: 900, kind: "fact", content: "DUP-EID 批内去重条目" }) + "\n");
+r = await step();
+ok(r.injected === null, "跨批重发同 eid 不再注入");
+
 console.log("== 9. 半行安全：不完整行不消费，坏行跳过不崩 ==");
 const fd = fs.openSync(path.join(TMP, "changes.jsonl"), "a");
 fs.writeSync(fd, JSON.stringify({ ts: new Date().toISOString(), op: "remember", id: 600, kind: "fact", content: "半行测试" }).slice(0, 30)); // 故意截断
