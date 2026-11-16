@@ -63,6 +63,8 @@ if (!KEY) { // 无 key：优雅降级——跳过提炼（检索不受影响）�
 async function llm(prompt) {
   // v0.16 失败感知（第七轮外审实锤：LLM 连续失败返回空串 → items=[] → exit 0 删任务 = 永久漏记）：
   // 失败返回 null（与「成功返回空内容」严格区分），调用方必须将 null 视为任务失败保留重跑。
+  // v0.16.1（第八轮复核实锤：HTTP 200 + finish_reason=length + 截断 JSON 被当成功）：
+  // finish_reason=length 的输出对纯 JSON 提炼是坏输出 → 同样按失败处理（重试后仍坏 → null）。
   for (let i = 0; i < 3; i++) {
     try {
       const r = await fetch(`${BASE}/chat/completions`, {
@@ -71,8 +73,12 @@ async function llm(prompt) {
         body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2500, temperature: 0 }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const t = (await r.json()).choices?.[0]?.message?.content;
-      if (typeof t === "string") return t; // 空串也是合法响应（模型判空）；只有网络/HTTP/解析失败才走重试
+      const j = await r.json();
+      const ch = j?.choices?.[0];
+      if (!ch) throw new Error("no choices");
+      if (ch.finish_reason === "length") throw new Error("finish_reason=length (truncated)"); // 截断输出不可信
+      if (typeof ch.message?.content === "string") return ch.message.content; // 空串也是合法响应（模型判空）
+      throw new Error("no content");
     } catch {}
     await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
   }
@@ -138,8 +144,12 @@ ${transcript}
 
 const raw = await llm(prompt);
 if (raw === null) failJob("extract_llm_failed", { stage: "facts" }); // v0.16：LLM 失败≠空结果，任务保留重跑
-let items = [];
-try { items = JSON.parse((raw ?? "[]").match(/\[[\s\S]*\]/)?.[0] ?? "[]"); } catch {}
+if (raw.trim() === "") failJob("extract_llm_bad_output", { stage: "facts", reason: "empty-content" }); // v0.16.1：空串对「输出 JSON 数组」的 prompt 是坏输出（合法空 = "[]"）
+const arrMatch = raw.match(/\[[\s\S]*\]/);
+if (!arrMatch) failJob("extract_llm_bad_output", { stage: "facts", reason: "no-json-array" }); // 截断/非 JSON 输出（复核实锤曾当成功）
+let items;
+try { items = JSON.parse(arrMatch[0]); } catch (e) { failJob("extract_llm_bad_output", { stage: "facts", reason: "json-parse-failed" }); }
+if (!Array.isArray(items)) failJob("extract_llm_bad_output", { stage: "facts", reason: "not-array" }); // 条目级 schema 在入队循环校验（无效条目忽略，数组本身必须合法）
 
 // —— 会话摘要卡（v0.9）：1-2 句带日期感的自包含总结，作为 episode 候选入库 ——
 const summaryPrompt = `以下是用户与 AI 助手的一次会话中，用户的原始发言（按顺序编号，中间可能有省略标注）：
@@ -155,7 +165,7 @@ let summary = "";
 {
   const s = await llm(summaryPrompt);
   if (s === null) failJob("extract_llm_failed", { stage: "summary" }); // 摘要失败同样保留重跑（提炼候选 eid 幂等，重跑不重复入库）
-  summary = s.trim().replace(/^["'「『]|["'」』]$/g, "").slice(0, 500);
+  summary = s.trim().replace(/^["'「『]|["'」』]$/g, "").slice(0, 500); // 空串=模型判无摘要，合法（零候选终态）
 }
 
 // —— 产出候选（不碰库）：追加 pending-memories.jsonl，server 统一提交入口消费。
@@ -177,7 +187,15 @@ if (!JOB_REV) {
   catch (e) { failJob("extract_rev_writeback_failed", { error: String(e.message || e).slice(0, 80) }); }
 }
 const candEid = (kind, content) => "h-" + createHash("sha256").update(`${job.sessionId}|${JOB_REV}|${kind}|${content}`).digest("hex").slice(0, 24);
-const appendCandidate = (kind, content, tags) => { try { fs.appendFileSync(CANDIDATES, JSON.stringify({ eid: candEid(kind, content), sessionId: job.sessionId, date: job.date, kind, content: String(content).slice(0, 2000), tags, capturedAt: JOB_REV, extractedAt: new Date().toISOString(), eventDate: job.date }) + "\n"); return true; } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; } };
+const appendCandidate = (kind, content, tags) => {
+  const eid = candEid(kind, content);
+  try {
+    fs.appendFileSync(CANDIDATES, JSON.stringify({ eid, sessionId: job.sessionId, date: job.date, kind, content: String(content).slice(0, 2000), tags, capturedAt: JOB_REV, extractedAt: new Date().toISOString(), eventDate: job.date }) + "\n");
+    producedEids.push(eid);
+    return true;
+  } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; }
+};
+const producedEids = []; // v0.16.1 任务交接：receipt 向 server 声明「本任务产出的全部候选 eid」，done 以全部处置完毕为准
 let candidates = 0, rejected = 0, enqueueFailed = 0;
 for (const it of items) {
   if (!it?.content || !["preference", "fact", "procedure", "todo"].includes(it.kind)) continue;
@@ -194,6 +212,16 @@ audit("extract_done", { sessionId: job.sessionId, llmItems: items.length, candid
 if (enqueueFailed > 0) { // 未安全落盘的候选：保留 job 供重跑，非零退出（绝不假装成功）
   failJob("extract_enqueue_failed_job_preserved", { enqueueFailed });
 }
+// —— v0.16.1 任务回执：向 server 声明本任务的候选交接清单（全部 eid / 零候选）。
+// server 的 settleLedger 以「清单内全部 eid 已处置（meta 在场）」为 done 条件——
+// 修复复核实锤「任意一条候选成功就 done」；零候选任务由此获得明确终态（不再无账本记录）。
+const safeName = (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, "_");
+const receiptsDir = path.join(MEM_DIR, "extraction-jobs", "receipts");
+try {
+  fs.mkdirSync(receiptsDir, { recursive: true });
+  fs.writeFileSync(path.join(receiptsDir, `${safeName(job.sessionId)}-${safeName(JOB_REV)}.json`),
+    JSON.stringify({ sessionId: job.sessionId, revision: JOB_REV, eids: producedEids, at: new Date().toISOString() }));
+} catch (e) { failJob("extract_receipt_write_failed", { error: String(e.message || e).slice(0, 80) }); } // 回执写失败=任务未交接，保留重跑（候选 eid 幂等）
 fs.rmSync(jobPath, { force: true });
 console.error(`[extract] ${job.sessionId}: ${items.length} 条提炼, ${candidates} 候选入队, ${rejected} 凭据拒收`);
 process.exit(0);

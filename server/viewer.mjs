@@ -609,13 +609,18 @@ http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, "http://x");
     // v0.16 访问边界（第七轮外审实锤：无 Origin 校验 + ACAO:* → 恶意网页可跨站 POST 删除记忆）。
-    // 本地管理页：非空 Origin 必须是本机来源；Host 必须是本机地址（同时防 DNS rebinding）。
+    // v0.16.1（第八轮复核实锤：跨端口本机 Origin 仍可写入）——从 hostname 白名单收紧为【同源】：
+    // Origin 的 host:port 必须与请求的 Host 头全等（管理页自己），任何其他端口一律 403。
     // 移除 ACAO:*——viewer 页面与 API 同源，合法使用不需要 CORS。
     const origin = req.headers.origin;
     if (origin) {
-      let oHost = "";
-      try { oHost = new URL(origin).hostname; } catch {}
-      if (!["127.0.0.1", "localhost", "[::1]"].includes(oHost)) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
+      const host = String(req.headers.host || "");
+      const hostName = host.replace(/:\d+$/, "");
+      let oHost = "", oPort = "";
+      try { const uo = new URL(origin); oHost = uo.hostname; oPort = uo.port; } catch {}
+      const sameOrigin = oHost === hostName && oPort === host.replace(/^[^:]+:/, "") &&
+        ["127.0.0.1", "localhost", "[::1]", "::1"].includes(oHost);
+      if (!sameOrigin) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
     }
     const host = String(req.headers.host || "");
     const hostName = host.replace(/:\d+$/, "");

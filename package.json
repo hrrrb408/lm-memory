@@ -1,6 +1,6 @@
 {
   "name": "dsh-lm-memory",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "本地优先的 Agent 长期记忆：MCP server（SQLite+FTS5+双语语义+遗忘曲线+统一提交入口）+ DSH 采集插件（外发前脱敏/事件时间锚/会话指纹二采）",
   "type": "module",
   "license": "MIT",

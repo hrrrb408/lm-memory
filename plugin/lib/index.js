@@ -156,8 +156,9 @@ function dispatchExtraction(session, texts, config) {
     fs.mkdirSync(jobsDir, { recursive: true });
     // v0.16 文件名带 rev（第七轮外审实锤竞态：文件名固定为 sessionId 时，续聊的新 dispatch 覆盖同一路径，
     // 旧 worker（仍在跑几十秒 LLM）完成时 rmSync 删掉的是【新任务】）——rev 入名 = 每次派发独立文件，互不覆盖。
+    // v0.16.1：rev 含冒号/点号，Windows 文件名非法 → 清洗为安全字符。
     const rev = new Date().toISOString();
-    const jobFile = path.join(jobsDir, `${session.id}-${rev}.json`);
+    const jobFile = path.join(jobsDir, `${session.id}-${rev.replace(/[:.]/g, "-")}.json`);
     fs.writeFileSync(jobFile, JSON.stringify({
       sessionId: session.id,
       rev, // v0.15.3 来源 revision：job 创建时固定——重跑同 job 复用同一 rev，
