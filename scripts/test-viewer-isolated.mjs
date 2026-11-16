@@ -26,6 +26,7 @@ let child;
 try {
   fs.mkdirSync(path.join(tmp, 'server'));
   fs.copyFileSync(path.join(root, 'server/viewer.mjs'), path.join(tmp, 'server/viewer.mjs'));
+  fs.copyFileSync(path.join(root, 'server/conflict.mjs'), path.join(tmp, 'server/conflict.mjs')); // viewer 依赖它做冲突复核
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(tmp, 'node_modules'), 'dir');
   fs.writeFileSync(path.join(tmp, 'package.json'), '{"version":"test"}');
   // The viewer starts this stub in place of memory-server; no real MCP/database mutations.

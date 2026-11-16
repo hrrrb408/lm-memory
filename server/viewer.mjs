@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { fileURLToPath } from "node:url";
+import { findConflictPairs, buildReviewPrompt, parseReview } from "./conflict.mjs";
 
 const PORT = Number(process.argv[2] || 7640);
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".dsh", "memory");
@@ -69,6 +70,54 @@ ${body}`);
 function cachedProfile() {
   try { return JSON.parse(ro().prepare("SELECT value FROM meta WHERE key='profile'").get()?.value ?? "null"); } catch { return null; }
 }
+
+// ---- v0.14.2 冲突候选复核（结论缓存于 meta 表，误报对只复核一次）----
+// 扫描走只读连接（conflict.mjs 纯函数）；复核走 viewer 自己的 llm 通道；
+// 结论 key=conflict_review:<loId>-<hiId>，附两侧 updated_at——任一侧内容变更即缓存失效重审。
+const CONFLICT_CACHE_PREFIX = "conflict_review:";
+const conflictReviewVerdict = (oldR, newR) => {
+  const key = CONFLICT_CACHE_PREFIX + Math.min(oldR.id, newR.id) + "-" + Math.max(oldR.id, newR.id);
+  try {
+    const v = JSON.parse(ro().prepare("SELECT value FROM meta WHERE key=?").get(key)?.value ?? "null");
+    if (!v || v.verdict === undefined) return null;
+    if (v.old_at !== String(oldR.updated_at) || v.new_at !== String(newR.updated_at)) return null; // 内容变过，重审
+    return v.verdict;
+  } catch { return null; }
+};
+const saveConflictReview = (oldR, newR, verdict) => {
+  const key = CONFLICT_CACHE_PREFIX + Math.min(oldR.id, newR.id) + "-" + Math.max(oldR.id, newR.id);
+  try {
+    rw().prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(key, JSON.stringify({
+      verdict, old_at: String(oldR.updated_at), new_at: String(newR.updated_at), reviewed_at: new Date().toISOString(),
+    }));
+  } catch {}
+};
+// 带缓存的复核：返回 { total, needAction, pairs:[{...p, verdict}] }；llm 不可用时 verdict 全为 null（未复核）
+async function conflictCandidates() {
+  const r = findConflictPairs(ro(), { maxPairs: 20 });
+  const pairs = r.pairs.map((p) => ({ ...p, verdict: conflictReviewVerdict(p.old, p.new) }));
+  const pending = pairs.filter((p) => p.verdict === null);
+  if (pending.length && llmAvailable()) {
+    const raw = await llm(buildReviewPrompt(pending));
+    const verdicts = parseReview(raw, pending.length);
+    if (verdicts) {
+      verdicts.forEach((v, idx) => {
+        const p = pending[idx];
+        if (!p) return;
+        p.verdict = v.verdict;
+        saveConflictReview(p.old, p.new, v.verdict);
+      });
+      // 未拿到判定的残余（模型漏答）保持 null
+    }
+  }
+  return {
+    total: pairs.length,
+    needAction: pairs.filter((p) => p.verdict === "superseded").length,
+    unreviewed: pairs.filter((p) => p.verdict === null).length,
+    pairs,
+  };
+}
+function llmAvailable() { try { return !!ZAI_KEY(); } catch { return false; } }
 
 const KIND_META = {
   preference: ["偏好", "#c8402e"], fact: ["事实", "#2563eb"], procedure: ["经验", "#0f766e"],
@@ -215,22 +264,46 @@ window.hist = async (id) => {
 };
 window.pin = async (id, to) => { await fetch("/api/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: to ? "pin" : "unpin" }) }); if ($("#dormant").style.display !== "none") loadDormant(); else load(); };
 window.wake = async (id) => { await fetch("/api/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: "wake" }) }); loadDormant(); };
+let sleepNote = "";
 window.runSleep = async () => {
-  const r = await (await fetch("/api/sleep", { method: "POST" })).json();
-  const bar = document.createElement("div");
-  bar.className = "sleep-note";
-  bar.textContent = r.msg || "整理完成";
-  $("#dormant").prepend(bar);
-  loadDormant();
+  try {
+    const r = await (await fetch("/api/sleep", { method: "POST" })).json();
+    sleepNote = r.msg || "整理完成";
+  } catch (e) {
+    sleepNote = "整理失败：" + (e?.message ?? e);
+  }
+  loadDormant(); // 渲染时统一带上提示条，避免先插后冲
+};
+// 冲突候选复核（异步填充 #conflictbox；结论缓存在 meta，误报对只复核一次）
+window.loadConflicts = async () => {
+  const box = $("#conflictbox");
+  if (!box) return;
+  try {
+    const d = await (await fetch("/api/conflicts")).json();
+    if (!d.total) { box.innerHTML = '<div class="content"><span class="meta">冲突扫描：没有疑似过时的候选对，库是干净的。</span></div>'; return; }
+    if (d.unreviewed > 0) { box.innerHTML = '<div class="content"><span class="meta">冲突扫描：' + d.total + ' 对候选，其中 ' + d.unreviewed + ' 对待复核（无模型通道，稍后再试）。</span></div>'; return; }
+    const superseded = d.pairs.filter((p) => p.verdict === "superseded");
+    const row = (p) => '<div class="prow"><span class="dot" style="background:' + (KCOL[p.old.kind] ?? "#666") + '"></span><div class="profile-content">#' + p.old.id + " " + esc(p.old.snippet) + " → 建议 #" + p.new.id + " 接棒</div></div>";
+    box.innerHTML = d.needAction === 0
+      ? '<div class="content"><span class="meta">冲突扫描：' + d.total + " 对候选已复核，均无需处置（相关或纯相似，非过时）。</span></div>"
+      : '<div class="content"><span class="meta">冲突扫描：复核后 ' + d.needAction + " 对疑似真过时：</span><div class='plist'>" + superseded.map(row).join("") + "</div><span class='meta'>确认后可在记忆库列表给旧条补「已过时，见新条」指针。</span></div>";
+  } catch (e) {
+    box.innerHTML = '<div class="content"><span class="meta">冲突复核失败：' + esc(String(e?.message ?? e)) + "</span></div>";
+  }
 };
 window.loadDormant = async () => {
   const d = await (await fetch("/api/dormant")).json();
   const el = $("#dormant");
-  el.innerHTML = '<div class="mem"><div class="content">休眠馆：长期未被召回的记忆自动转到这里，不再参与检索与 current.md 基线，但随时可唤醒。宽限期：待办45天 · 会话60天 · 事实/经验120天 · 偏好240天（命中延期+7天/次）<div class="acts"><a onclick="runSleep()">🔄 跑一次整理</a></div></div></div>'
+  // 冲突区块：先渲染占位（复核中），复核完成后替换为结论
+  const conflictHtml = '<div class="mem" id="conflictbox"><div class="content"><span class="meta">冲突扫描复核中…</span></div></div>';
+  el.innerHTML = (sleepNote ? '<div class="sleep-note">' + esc(sleepNote) + '</div>' : '')
+    + conflictHtml
+    + '<div class="mem"><div class="content">休眠馆：长期未被召回的记忆自动转到这里，不再参与检索与 current.md 基线，但随时可唤醒。宽限期：待办45天 · 会话60天 · 事实/经验120天 · 偏好240天（命中延期+7天/次）<div class="acts"><a onclick="runSleep()">🔄 跑一次整理</a></div></div></div>'
     + (d.items.length ? d.items.map((m) => {
       const [label, color] = K[m.kind] ?? [m.kind, "#666"];
       return \`<div class="mem" style="opacity:.75"><div class="top"><span class="badge" style="background:\${color}">\${label}</span><span class="meta">休眠于 \${(m.updated_at || "").slice(0, 10)}\${m.hit_count ? " · 曾召回×" + m.hit_count : ""}</span></div><div class="content">\${foldContent(m.content)}</div><div class="acts"><a onclick="wake(\${m.id})">☀️ 唤醒</a><a onclick="pin(\${m.id}, 1)">📌 置顶并唤醒</a></div></div>\`;
     }).join("") : '<div class="empty">没有休眠记忆 🎉</div>');
+  loadConflicts(); // 异步填充冲突复核区块
 };
 $("#stats").addEventListener("click", (e) => { const k = e.target.closest(".chip")?.dataset.k; if (k === undefined) return; filter = k || null; load(); });
 window.showView = (v) => {
@@ -571,6 +644,9 @@ http.createServer(async (req, res) => {
     if (req.method === "GET" && u.pathname === "/api/dormant") {
       const rows = ro().prepare("SELECT id, version, kind, content, tags, updated_at, hit_count, pinned FROM memories WHERE status='dormant' ORDER BY updated_at DESC LIMIT 200").all();
       return json({ items: rows, total: rows.length });
+    }
+    if (req.method === "GET" && u.pathname === "/api/conflicts") { // v0.14.2 候选对 + 缓存化复核结果
+      return json(await conflictCandidates());
     }
     if (req.method === "GET" && u.pathname === "/api/profile") {
       const all = Array.isArray(await call("memory_list", { limit: 1000 })) ? await call("memory_list", { limit: 1000 }) : [];
