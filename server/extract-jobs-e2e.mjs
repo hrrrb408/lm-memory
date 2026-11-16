@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const httpMod = http; // 场景7 原始请求复用
@@ -17,6 +18,7 @@ const MEM_DIR = process.env.LM_MEMORY_DIR;
 if (!MEM_DIR || MEM_DIR === path.join(process.env.HOME, ".dsh", "memory") || MEM_DIR === path.join(process.env.HOME, ".lm-memory")) {
   console.error("拒绝在真实库上跑测试"); process.exit(2);
 }
+process.env.LM_TEST_KEY = "test"; // 让 server spawn 的 helper 继承测试 key（生产从 env/credentials 读取）
 const DB = path.join(MEM_DIR, "memory.db");
 import { rmEvalDir } from "../scripts/eval/eval-dir-guard.mjs";
 rmEvalDir(MEM_DIR);
@@ -185,6 +187,67 @@ t("current.md 已补齐该条目（EXISTS 自愈）", fs.readFileSync(currentMd,
 // —— 场景 6：dispatch 文件名带 rev（竞态消除，静态断言）——
 const pluginSrc = fs.readFileSync(fileURLToPath(new URL("../plugin/lib/index.js", import.meta.url)), "utf8");
 t("dispatch 文件名含 rev（旧 worker 删不到新任务）", /\$\{session\.id\}-\$\{rev\.replace/.test(pluginSrc));
+t("插件不再直接 spawn helper（统一走 server 登记+领取入口）", !/extract-helper\.mjs/.test(pluginSrc) && pluginSrc.includes("pending-jobs.jsonl"));
+
+// —— 场景 6b：旧表升级（第九轮复核实锤：v0.16 表 CHECK 无 pending，登记失败被静默吞、回执被删）——
+{
+  const oldDir = fs.mkdtempSync(path.join(os.tmpdir(), "lm-olddb-"));
+  const odb = new DatabaseSync(path.join(oldDir, "memory.db"));
+  odb.exec("PRAGMA journal_mode=WAL");
+  odb.exec(`CREATE TABLE extract_jobs (session_id TEXT NOT NULL, revision TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0, last_note TEXT, updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, revision))`);
+  odb.prepare("INSERT INTO extract_jobs (session_id, revision, status, attempts, updated_at) VALUES (?,?,?,?,?)").run("s-old", "R-old", "running", 2, new Date().toISOString());
+  fs.mkdirSync(path.join(oldDir, "extraction-jobs", "receipts"), { recursive: true });
+  fs.writeFileSync(path.join(oldDir, "extraction-jobs", "receipts", "s-old2-R-old2.json"), JSON.stringify({ sessionId: "s-old2", revision: "R-old2", eids: [], at: new Date().toISOString() }));
+  odb.close();
+  const c2 = new Client({ name: "olddb-e2e", version: "0.16" });
+  await c2.connect(new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL("./memory-server.mjs", import.meta.url))], env: { ...process.env, LM_MEMORY_DIR: oldDir, LM_EMBED: "0" } }));
+  await (await c2.callTool({ name: "memory_recall", arguments: { query: "触发旧库迁移结算" } }));
+  const odb2 = new DatabaseSync(path.join(oldDir, "memory.db"), { readOnly: true });
+  t("旧表迁移：running→pending（CHECK 含 pending 可写）", odb2.prepare("SELECT status FROM extract_jobs WHERE revision='R-old'").get()?.status === "pending");
+  t("旧表迁移后零候选回执能结清 done", odb2.prepare("SELECT status, last_note FROM extract_jobs WHERE revision='R-old2'").get()?.status === "done", JSON.stringify(odb2.prepare("SELECT status, last_note FROM extract_jobs WHERE revision='R-old2'").get()));
+  t("回执仅在结清后删除", !fs.existsSync(path.join(oldDir, "extraction-jobs", "receipts", "s-old2-R-old2.json")));
+  await c2.close();
+  fs.rmSync(oldDir, { recursive: true, force: true });
+}
+
+// —— 场景 6c：首次派发走统一入口（第九轮复核实锤：插件直接 spawn 绕过登记/领取）——
+{
+  const waitFor = async (cond, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (cond()) return true; await new Promise((r) => setTimeout(r, 200)); } return false; };
+  const dispJob = path.join(jobsDir, "s-disp-2026-11-17T04-00-00-000Z.json");
+  fs.writeFileSync(dispJob, JSON.stringify({ sessionId: "s-disp", rev: "2026-11-17T04:00:00.000Z", date: "2026-11-17", cwd: "", texts: ["派发入口测试甲 PFMARK", "派发入口测试乙"], llm: { model: "mock", baseURL: `http://127.0.0.1:${mockPort}/v1`, apiKeyEnv: "LM_TEST_KEY" } }));
+  const oldT = new Date(Date.now() - 3 * 60 * 1000); fs.utimesSync(dispJob, oldT, oldT);
+  fs.appendFileSync(path.join(MEM_DIR, "pending-jobs.jsonl"), JSON.stringify({ sessionId: "s-disp", rev: "2026-11-17T04:00:00.000Z", jobFile: path.basename(dispJob) }) + "\n");
+  await call("memory_recall", { query: "派发入口测试" });
+  const seen = await waitFor(() => !!db().prepare("SELECT 1 FROM extract_jobs WHERE revision='2026-11-17T04:00:00.000Z'").get(), 5000);
+  const ledgerDisp = db().prepare("SELECT status, attempts FROM extract_jobs WHERE revision='2026-11-17T04:00:00.000Z'").get();
+  t("通知被消费且任务经领取登记（attempts≥1）", seen && ledgerDisp?.attempts >= 1, JSON.stringify(ledgerDisp));
+  const receiptSeen = await waitFor(() => { const d = path.join(MEM_DIR, "extraction-jobs", "receipts"); return fs.existsSync(d) && fs.readdirSync(d).some((f) => f.startsWith("s-disp")); }, 20000);
+  t("server 拉起的 helper 完成后写回执", receiptSeen);
+  await call("memory_recall", { query: "派发入口测试 消费候选" }); // 消费 PF 候选 + settle
+  t("首次派发任务经统一入口结算 done", db().prepare("SELECT status FROM extract_jobs WHERE revision='2026-11-17T04:00:00.000Z'").get()?.status === "done");
+}
+
+// —— 场景 6d：第五次有效租约不被误杀（第九轮复核实锤：attempts 耗尽判断在租约检查之前）——
+{
+  const leaseJob = path.join(jobsDir, "s-lease-2026-11-17T04-01-00-000Z.json");
+  fs.writeFileSync(leaseJob, JSON.stringify({ sessionId: "s-lease", rev: "2026-11-17T04:01:00.000Z", date: "2026-11-17", cwd: "", texts: ["租约测试甲", "租约测试乙"], llm: { model: "mock", baseURL: `http://127.0.0.1:${mockPort}/v1`, apiKeyEnv: "LM_TEST_KEY" } }));
+  const oldT = new Date(Date.now() - 3 * 60 * 1000); fs.utimesSync(leaseJob, oldT, oldT);
+  dbw().prepare("INSERT OR REPLACE INTO extract_jobs (session_id, revision, status, attempts, owner, last_note, updated_at) VALUES ('s-lease','2026-11-17T04:01:00.000Z','running',5,'srv-other',NULL,?)").run(new Date().toISOString());
+  const startSecond = () => new Promise((resolve) => {
+    const ch = spawn(process.execPath, [fileURLToPath(new URL("./memory-server.mjs", import.meta.url))], { env: { ...process.env, LM_MEMORY_DIR: MEM_DIR, LM_EMBED: "0" }, stdio: ["ignore", "ignore", "ignore"] });
+    setTimeout(() => { try { ch.kill("SIGTERM"); } catch {} resolve(); }, 2500); // 等 startup respawn 跑过
+  });
+  await startSecond();
+  const alive = db().prepare("SELECT status, attempts FROM extract_jobs WHERE revision='2026-11-17T04:01:00.000Z'").get();
+  t("有效租约内第五次执行不被归档（attempts=5 保留）", alive?.status === "running" && alive?.attempts === 5, JSON.stringify(alive));
+  dbw().prepare("UPDATE extract_jobs SET updated_at=? WHERE session_id='s-lease'").run(new Date(Date.now() - 11 * 60 * 1000).toISOString()); // 租约过期
+  await startSecond();
+  const dead = db().prepare("SELECT status FROM extract_jobs WHERE revision='2026-11-17T04:01:00.000Z'").get();
+  t("租约过期后才判耗尽（第 6 次领取 → failed）", dead?.status === "failed", JSON.stringify(dead));
+}
 
 // —— 场景 7：viewer Origin 边界 ——
 {

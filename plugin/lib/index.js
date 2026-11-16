@@ -168,12 +168,10 @@ function dispatchExtraction(session, texts, config) {
       texts,
       llm: typeof config?.llm === "object" ? config.llm : {}, // {model, baseURL, apiKeyEnv} 显式配置优先
       sessionModel: extractSessionModel(session) || undefined, // 会话真实模型（request/header），未显式配置时跟随
-    }));
-        const child = spawn(resolveNode(), [path.join(libDir(), "extract-helper.mjs"), jobFile], {
-      detached: true, stdio: "ignore",
-      env: { ...process.env, LM_MEMORY_DIR: MEM_DIR },
-    });
-    child.unref();
+    })); // 写 job 文件（rev 入名，见上）
+    // v0.16.2 任务协议（第九轮复核实锤：插件直接 spawn 绕过登记/领取，双 worker 出现在首次执行）：
+    // 插件只写「待派发通知」，server 消费通知后执行「登记→原子领取→spawn」，与恢复器完全同一入口。
+    fs.appendFileSync(path.join(MEM_DIR, "pending-jobs.jsonl"), JSON.stringify({ sessionId: session.id, rev, jobFile: path.basename(jobFile) }) + "\n");
     log(`extraction dispatched: ${session.id} (${texts.length} msgs)`);
   } catch (e) {
     log(`extract dispatch error: ${e?.message ?? e}`);

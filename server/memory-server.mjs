@@ -17,6 +17,7 @@ try { ({ pipeline: hfPipeline, env: hfEnv } = await import("@huggingface/transfo
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawn } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { rebuildEdges, neighbors } from "./graph.mjs";
@@ -250,32 +251,45 @@ const OUTBOX_READY = (() => {
     return true;
   } catch (e) { console.error("[memory] outbox init:", e.message); return false; }
 })();
-// v0.16 提炼任务账本（第七/八轮外审：任务持久状态机，「有没有漏记」可查询）。
-// v0.16.1 协议收口：pending（接收即登记）→ running（原子领取，owner+lease）→ done（全部候选处置完毕，
-// 由 receipt 清单核对 meta 得出——任意一条候选成功不再算 done）/ failed（重试超限归档）。
-// 零候选任务有明确终态（receipt.zeroCandidate → done zero）。观察点：
-// ①登记：巡检/启动时把 extraction-jobs/*.json 登记为 pending（文件存在=任务在途）
-// ②领取：respawn 用条件 UPDATE 原子抢锁（lease 内他 server 不抢），抢到才 spawn
-// ③确认：settleLedger 核对 receipts/——receipt 列出的全部 eid 已入 meta（或 zero）→ done
+// v0.16 提炼任务账本（第七/八/九轮外审：任务持久状态机，「有没有漏记」可查询）。
+// v0.16.2 协议收口（第九轮复核实锤）：①旧表升级必须迁移 CHECK 约束（v0.16 表不允许 pending，
+// INSERT OR IGNORE 会静默吞掉登记失败）；②登记/结算必须检查实际成功；③首次派发与恢复共用
+// 「登记→领取→spawn」入口（插件不再直接 spawn）；④重试耗尽判定发生在领取成功之后（有效租约不误杀）。
 try {
-  db.exec(`CREATE TABLE IF NOT EXISTS extract_jobs (
-    session_id TEXT NOT NULL, revision TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','done','failed')),
-    attempts INTEGER NOT NULL DEFAULT 0, owner TEXT, last_note TEXT, updated_at TEXT NOT NULL,
-    PRIMARY KEY (session_id, revision))`);
-  try {
-    db.exec("ALTER TABLE extract_jobs ADD COLUMN owner TEXT"); // v0.16.1 迁移
-    db.exec("UPDATE extract_jobs SET status='pending' WHERE status='running'"); // 旧 running 全部回到待领取
-  } catch {}
+  const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='extract_jobs'").get()?.sql ?? "";
+  if (tableSql && !tableSql.includes("'pending'")) {
+    // 旧表（v0.16）CHECK 只允许 running/done/failed——SQLite 无法改 CHECK，重建-拷贝-换名。
+    // 旧 running 全部转 pending（进程重启后无真实持有者，等待重新领取）。
+    db.exec("BEGIN");
+    db.exec(`CREATE TABLE extract_jobs_new (
+      session_id TEXT NOT NULL, revision TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','done','failed')),
+      attempts INTEGER NOT NULL DEFAULT 0, owner TEXT, last_note TEXT, updated_at TEXT NOT NULL,
+      PRIMARY KEY (session_id, revision))`);
+    db.exec(`INSERT INTO extract_jobs_new (session_id, revision, status, attempts, last_note, updated_at)
+      SELECT session_id, revision, CASE WHEN status='running' THEN 'pending' ELSE status END, attempts, last_note, updated_at FROM extract_jobs`);
+    db.exec("DROP TABLE extract_jobs");
+    db.exec("ALTER TABLE extract_jobs_new RENAME TO extract_jobs");
+    db.exec("COMMIT");
+    console.error("[memory] v0.16.2 migration: extract_jobs CHECK +pending, running→pending");
+  } else {
+    db.exec(`CREATE TABLE IF NOT EXISTS extract_jobs (
+      session_id TEXT NOT NULL, revision TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','done','failed')),
+      attempts INTEGER NOT NULL DEFAULT 0, owner TEXT, last_note TEXT, updated_at TEXT NOT NULL,
+      PRIMARY KEY (session_id, revision))`);
+    try { db.exec("ALTER TABLE extract_jobs ADD COLUMN owner TEXT"); } catch {}
+  }
 } catch (e) { console.error("[memory] extract_jobs ledger init:", e.message); }
 const LEDGER_LEASE_MS = 10 * 60 * 1000; // 领取租约：LLM 三次重试约 30s，10 分钟足够宽
-function ledgerRegister(sessionId, revision) { // 接收即登记（INSERT OR IGNORE 不覆盖已有状态）
+function ledgerRegister(sessionId, revision) { // 接收即登记；返回是否真正写入（复核实锤：INSERT OR IGNORE 静默吞失败）
   try {
     db.prepare("INSERT OR IGNORE INTO extract_jobs (session_id, revision, status, attempts, updated_at) VALUES (?,?, 'pending', 0, ?)")
       .run(String(sessionId), String(revision), now());
-  } catch (e) { console.error("[memory] ledger register:", e.message); }
+    return true;
+  } catch (e) { console.error("[memory] ledger register:", e.message); audit("ledger_register_failed", { sessionId: String(sessionId), revision: String(revision), error: String(e.message).slice(0, 80) }); return false; }
 }
-function ledgerClaim(sessionId, revision, owner) { // 原子领取：条件 UPDATE，抢不到返回 false（v0.16.1 复核实锤：双 worker 同 revision）
+function ledgerClaim(sessionId, revision, owner) { // 原子领取：条件 UPDATE，抢不到返回 false（双 worker 防护）
   try {
     const r = db.prepare(`UPDATE extract_jobs SET status='running', attempts=attempts+1, owner=?, updated_at=?
       WHERE session_id=? AND revision=? AND (status='pending' OR (status='running' AND updated_at < ?))`)
@@ -284,7 +298,7 @@ function ledgerClaim(sessionId, revision, owner) { // 原子领取：条件 UPDA
   } catch (e) { console.error("[memory] ledger claim:", e.message); return false; }
 }
 // 确认：receipt 里列出的全部 eid 都已进 meta（消费完成/终态拒绝）→ done；零候选 receipt 直接 done。
-// 修复复核实锤「任意一条候选成功就 done」——done 语义 = 全部候选处置完毕。
+// v0.16.2：登记失败不删回执（下次重试）；done 更新失败（failed 保护）不删回执——回执是审计证据。
 function settleLedger() {
   let settled = 0;
   try {
@@ -296,19 +310,56 @@ function settleLedger() {
         const sid = String(rc.sessionId ?? ""), rev = String(rc.revision ?? "");
         if (!sid || !rev) continue;
         const prior = db.prepare("SELECT status FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev);
-        if (!prior) ledgerRegister(sid, rev); // v0.16.1：见回执即登记（部分处置中的任务也必须在账本可见——「有没有漏记」可查询）
+        if (!prior && !ledgerRegister(sid, rev)) continue; // 登记失败（如旧表约束）→ 保留回执待下次
         const allDone = !Array.isArray(rc.eids) || rc.eids.length === 0 || rc.eids.every((e) => db.prepare("SELECT 1 FROM meta WHERE key=?").get(`cand:${e}`));
         if (!allDone) continue; // 仍有候选在重试队列——任务不 done（行保持 pending/running，可查询）
-        db.prepare("UPDATE extract_jobs SET status='done', last_note=?, updated_at=? WHERE session_id=? AND revision=? AND status!='failed'")
+        const upd = db.prepare("UPDATE extract_jobs SET status='done', last_note=?, updated_at=? WHERE session_id=? AND revision=? AND status!='failed'")
           .run(rc.eids?.length ? `${rc.eids.length} candidates` : "zero-candidate", now(), sid, rev);
-        fs.rmSync(path.join(receiptsDir, f), { force: true }); // 结清的回执清理
+        if (upd.changes === 0) continue; // failed 保护（或行已不存在）→ 不删回执，保留证据
+        fs.rmSync(path.join(receiptsDir, f), { force: true }); // 仅结清后才删回执
         settled++;
-      } catch {}
+      } catch (e) { console.error("[memory] settle receipt:", e.message); }
     }
   } catch {}
   return settled;
 }
 const clip200 = (s) => String(s ?? "").slice(0, 200);
+// —— v0.16.2 首次派发入口（第九轮复核实锤：插件「写 job → spawn helper」绕过登记/领取协议，
+// 双 worker 可出现在首次执行）。插件现在只写 job 文件 + pending-jobs.jsonl 通知；
+// server 消费通知，执行「登记 → 原子领取 → spawn」，与恢复器完全共用同一路径。
+const PENDING_JOBS = path.join(MEM_DIR, "pending-jobs.jsonl");
+const SERVER_OWNER = `srv-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+function findHelperPath() {
+  return [
+    path.join(MEM_DIR, "plugin", "dsh-lm-capture", "lib", "extract-helper.mjs"), // 旧手工部署
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/lib/extract-helper.mjs"), // 包形态（server/ → ../plugin/lib）
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/dsh-lm-capture/lib/extract-helper.mjs"), // 旧手工部署（server/ 同级）
+  ].find((p) => fs.existsSync(p));
+}
+function spawnHelperJob(jobFile) {
+  const helper = findHelperPath();
+  if (!helper) return false;
+  const ch = spawn(process.execPath, [helper, jobFile], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
+  ch.unref();
+  return true;
+}
+function ingestPendingJobs() {
+  const r = consumeQueueFile(PENDING_JOBS, (rec) => {
+    if (!rec?.sessionId || !rec?.rev || !rec?.jobFile) return true; // 坏通知丢弃
+    const jobFile = path.join(MEM_DIR, "extraction-jobs", path.basename(String(rec.jobFile)));
+    if (!fs.existsSync(jobFile)) return true; // job 已被处理/清理（通知重放）→ 终态
+    ledgerRegister(rec.sessionId, rec.rev);
+    if (!ledgerClaim(rec.sessionId, rec.rev, SERVER_OWNER)) return true; // 已 done/failed 或租约内他人在跑 → 消费通知（恢复器兜底）
+    if (!spawnHelperJob(jobFile)) { // helper 缺失：归还领取（attempts-1）待下次
+      db.prepare("UPDATE extract_jobs SET status='pending', attempts=MAX(0, attempts-1), updated_at=? WHERE session_id=? AND revision=?").run(now(), rec.sessionId, rec.rev);
+      return false;
+    }
+    audit("job_dispatched", { sessionId: rec.sessionId, revision: rec.rev });
+    return true;
+  });
+  if (r.read) audit("ingest_pending_jobs", r);
+  return 0;
+}
 // 事务内插入事件（调用方负责 BEGIN/COMMIT）：内容变更与事件同一 SQLite 事务，崩溃窗口消除。
 // eid = 稳定事件身份：至少一次投递下，消费端按 eid 去重（跨 offset 重发也只应用一次）。
 function outboxInsert(op, data = {}) {
@@ -564,6 +615,7 @@ function ingestAll() { // 先消化自动采集与提炼候选，保证刚结束
   let n = 0;
   try { n += ingestPendingEpisodes(); } catch (e) { console.error("[memory] ingest episodes failed:", e.message); }
   try { n += ingestCandidates(); } catch (e) { console.error("[memory] ingest candidates failed:", e.message); }
+  try { ingestPendingJobs(); } catch (e) { console.error("[memory] ingest jobs failed:", e.message); } // v0.16.2 首次派发入口
   try { flushOutbox(); } catch {}
   try { settleLedger(); } catch {} // v0.16.1：结算任务回执（全部候选处置完毕才 done）
   try { // 接收即登记：extraction-jobs/ 里在途的 job 文件进账本（pending）
@@ -943,9 +995,8 @@ ingestAll(); // 启动即消化采集卡与提炼候选队列（v0.15 统一提�
 if (EMB_ENABLED) { void getEmbedder().then(() => getEmbedderEn()); void backfillEmbeddings(); } // 启动即预热双模型 + 后台回填（空库时 backfill 无活，预热让首次写入免付冷启动）
 try { const sr = sleepPassAnnounced(); } catch (e) { console.error("[memory] startup sleep pass:", e.message); } // v0.7 启动整理
 setInterval(() => { try { ingestAll(); sleepPassAnnounced(); void backfillEmbeddings(); } catch {} }, 12 * 3600 * 1000).unref(); // 每 12h 巡检：消化队列 + 休眠整理 + 补嵌
-void (async () => { // 提炼任务回收：登记遗留 job → 原子领取（lease）→ spawn；带重试上限（v0.16.1 任务协议收口）
+void (async () => { // 提炼任务恢复器：登记遗留 job → 原子领取 → spawn（v0.16.2：耗尽判定在领取之后）
   const MAX_ATTEMPTS = 5;
-  const OWNER = `srv-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   const respawnOldJobs = async (label) => {
     try {
       const jobsDir = path.join(MEM_DIR, "extraction-jobs");
@@ -955,38 +1006,34 @@ void (async () => { // 提炼任务回收：登记遗留 job → 原子领取（
         if (n) audit("orphan_jobs_preserved_remote_disabled", { count: n });
         return;
       }
-      const { spawn } = await import("node:child_process");
       const cand = fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).map((f) => path.join(jobsDir, f))
         .filter((f) => Date.now() - fs.statSync(f).mtimeMs > 120000).slice(0, 3);
       if (!cand.length) return;
-      const helper = [
-        path.join(MEM_DIR, "plugin", "dsh-lm-capture", "lib", "extract-helper.mjs"), // 旧手工部署
-        path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/lib/extract-helper.mjs"), // 包形态（server/ → ../plugin/lib）
-        path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/dsh-lm-capture/lib/extract-helper.mjs"), // 旧手工部署（server/ 同级）
-      ].find((p) => fs.existsSync(p));
-      if (!helper) return;
       const failedDir = path.join(jobsDir, "failed");
       let spawned = 0;
       for (const jobFile of cand) {
         let sid = path.basename(jobFile), rev = "";
         try { const j = JSON.parse(fs.readFileSync(jobFile, "utf8")); sid = j.sessionId; rev = j.rev || ""; } catch {}
-        ledgerRegister(sid, rev || "unknown"); // 接收即登记（v0.16.1）
-        const prior = db.prepare("SELECT attempts, status FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev || "unknown");
+        ledgerRegister(sid, rev || "unknown");
+        const prior = db.prepare("SELECT status FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev || "unknown");
         if (prior?.status === "done" || prior?.status === "failed") continue; // 已终态（job 文件残留）不重跑
-        if ((prior?.attempts ?? 0) >= MAX_ATTEMPTS) {
+        // v0.16.2（第九轮复核实锤）：先原子领取确认「任务可接管」——有效 running 租约内抢不到 → 跳过，绝不误杀在跑任务。
+        if (!ledgerClaim(sid, rev || "unknown", SERVER_OWNER)) continue;
+        const after = db.prepare("SELECT attempts FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev || "unknown");
+        if ((after?.attempts ?? 0) > MAX_ATTEMPTS) { // 领取后超限（第 6 次）才算耗尽——第 5 次有效执行不被归档
           fs.mkdirSync(failedDir, { recursive: true });
           try { fs.renameSync(jobFile, path.join(failedDir, path.basename(jobFile))); } catch {}
           db.prepare("UPDATE extract_jobs SET status='failed', last_note='attempts-exceeded', updated_at=? WHERE session_id=? AND revision=?").run(now(), sid, rev || "unknown");
-          audit("extract_job_failed_terminal", { sessionId: sid, revision: rev, attempts: prior.attempts });
+          audit("extract_job_failed_terminal", { sessionId: sid, revision: rev, attempts: after.attempts });
           continue;
         }
-        // 原子领取：lease 内他 server（MCP/viewer 子 server 的回收器）抢不到 → 单 worker（复核实锤双 worker 同 revision）
-        if (!ledgerClaim(sid, rev || "unknown", OWNER)) continue;
-        const ch = spawn(process.execPath, [helper, jobFile], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
-        ch.unref();
+        if (!spawnHelperJob(jobFile)) { // helper 缺失：归还领取
+          db.prepare("UPDATE extract_jobs SET status='pending', attempts=MAX(0, attempts-1), updated_at=? WHERE session_id=? AND revision=?").run(now(), sid, rev || "unknown");
+          continue;
+        }
         spawned++;
       }
-      if (spawned) audit("orphan_jobs_respawn", { count: spawned, by: label, owner: OWNER });
+      if (spawned) audit("orphan_jobs_respawn", { count: spawned, by: label, owner: SERVER_OWNER });
     } catch (e) { console.error("[memory] orphan respawn:", e.message); }
   };
   void respawnOldJobs("startup");
