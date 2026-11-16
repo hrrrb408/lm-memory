@@ -36,6 +36,15 @@ const DONE_RE = /已(解决|上线|修复|卸载|退役|完结|完成|交付|收
 // 显式指针引用：#339 先例格式「相关：id=319（Agnes 弃用）、id=338（幻影规则）」。
 const refPattern = (id) => new RegExp(`(?:id\\s*=\\s*|#)${id}(?![0-9])`);
 
+// 版本发布条（「vX.Y 发布/收官」式时间线记录）：新版本不推翻旧版本的记录，
+// 其与任何条目的相似都属同主题文档相似，不出 supersede 对。
+// 依据：2026-11-16 真库首轮复核，15 对候选 14 对误报中过半源于版本条互撞（#388）。
+const RELEASE_RE = /发布|收官|发版/;
+const isReleaseNote = (row) => {
+  const head = String(row?.content || "").slice(0, 80);
+  return /v\d+\.\d+/.test(head) && RELEASE_RE.test(head);
+};
+
 /**
  * 扫描 active 记忆中的疑似「旧条已被新条接棒」对。只读。
  * 两类信号（可叠加）：
@@ -71,6 +80,7 @@ export function findConflictPairs(db, { simMin = 0.85, refWindow = 40, maxPairs 
         : [entries[j].row, entries[i].row];
       const hiDone = DONE_RE.test(String(hi.content || ""));
       const loDone = DONE_RE.test(String(lo.content || ""));
+      if (isReleaseNote(hi) || isReleaseNote(lo)) continue; // 版本时间线互不推翻
       if (hiDone && !loDone) addPair(lo, hi, sim, "supersede_signal");
     }
   }
@@ -105,4 +115,39 @@ export function findConflictPairs(db, { simMin = 0.85, refWindow = 40, maxPairs 
     return ry - rx || y.sim - x.sim;
   });
   return { scanned: rows.length, noEmb: rows.length - entries.length, total: pairs.length, pairs: pairs.slice(0, maxPairs) };
+}
+
+// ---- v0.14.1 Level 2 语义复核（纯函数部分，供单测；fetch 薄壳在调用方）----
+// 规则式信号只产候选对（真库实证误报率高），真伪判定交给模型：逐对判
+// superseded（旧条已被接棒）/ related（相关但都有效）/ unrelated（纯属相似）。
+
+/** 构造复核 prompt：候选对摘要+两侧更多上下文，要求纯 JSON 输出。 */
+export function buildReviewPrompt(pairs) {
+  const list = pairs.map((p, i) =>
+    `[${i}] 旧#${p.old.id}（${p.old.updated_at}）：${p.old.snippet}\n` +
+    `    新#${p.new.id}（${p.new.updated_at}）：${p.new.snippet}`
+  ).join("\n");
+  return `以下是记忆库中「疑似旧条已被新条接棒」的候选对（规则式粗筛，误报率高）。请逐对判断：
+
+${list}
+
+判断标准：
+- superseded：旧条描述的状态/流程确实已被新条取代或解决，旧条继续被当现行会误导
+- related：两条相关但各自仍然有效（版本时间线、历史事件、经验沉淀、互为补充都算 related）
+- unrelated：只是文本相似，实质无关
+
+只输出 JSON 数组，如 [{"i":0,"verdict":"related"},{"i":1,"verdict":"superseded"}]，不要解释。`;
+}
+
+/** 解析模型复核输出；解析失败返回 null（调用方降级为候选对播报）。 */
+export function parseReview(text, pairCount) {
+  const arr = JSON.parse(String(text ?? "").match(/\[[\s\S]*\]/)?.[0] ?? "null");
+  if (!Array.isArray(arr)) return null;
+  const out = [];
+  for (const v of arr) {
+    const i = Number(v?.i);
+    if (!Number.isInteger(i) || i < 0 || i >= pairCount) continue;
+    if (v?.verdict === "superseded" || v?.verdict === "related" || v?.verdict === "unrelated") out.push({ i, verdict: v.verdict });
+  }
+  return out;
 }

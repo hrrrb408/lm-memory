@@ -20,7 +20,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { rebuildEdges, neighbors } from "./graph.mjs";
 import { runSleepPass } from "./sleep.mjs";
-import { findConflictPairs } from "./conflict.mjs";
+import { findConflictPairs, buildReviewPrompt, parseReview } from "./conflict.mjs";
 import { embeddingCacheKey, rrfScore, boundedRecall, boundedIndex } from "./recall-utils.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
@@ -255,8 +255,50 @@ function sleepPassAnnounced() {
       total: conflicts.total,
       pairs: conflicts.pairs.slice(0, 3).map((p) => ({ old: p.old.id, new: p.new.id, sim: p.sim, suggestion: p.suggestion })),
     });
+    reviewConflictsAsync(conflicts.pairs); // v0.14.1 Level 2：模型判真伪，复核后只播报 superseded
   }
   return { ...r, conflicts };
+}
+
+// ---- v0.14.1 冲突候选 Level 2 语义复核（fire-and-forget，不阻塞 sleep pass）----
+// 规则式粗筛误报率高（真库实证 93%），候选对交默认提炼模型判真伪：
+// superseded 才二次播报（热流）；related/unrelated 只进审计。无 key 静默降级为候选对播报。
+const REVIEW_BASE = process.env.LM_LLM_BASE || "https://open.bigmodel.cn/api/coding/paas/v4";
+const REVIEW_MODEL = process.env.LM_LLM_MODEL || "glm-5.3-flash";
+function resolveReviewKey() {
+  if (process.env.ZAI_CODING_CN_API_KEY) return process.env.ZAI_CODING_CN_API_KEY;
+  try { return fs.readFileSync(path.join(os.homedir(), ".dsh/.credentials.yaml"), "utf8").match(/ZAI_CODING_CN_API_KEY:\s*(\S+)/)?.[1]; } catch { return undefined; }
+}
+async function reviewConflictsAsync(pairs) {
+  if (!pairs?.length || pairs.length > 20) return;
+  const key = resolveReviewKey();
+  if (!key) { audit("conflict_review_skipped_no_key", { total: pairs.length }); return; }
+  const raw = await (async () => {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const res = await fetch(REVIEW_BASE + "/chat/completions", {
+          method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          body: JSON.stringify({ model: REVIEW_MODEL, messages: [{ role: "user", content: buildReviewPrompt(pairs) }], max_tokens: 2000, temperature: 0 }),
+        });
+        const t = (await res.json()).choices?.[0]?.message?.content ?? "";
+        if (t) return t;
+      } catch {}
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
+    return "";
+  })();
+  const verdicts = parseReview(raw, pairs.length);
+  if (verdicts === null) { audit("conflict_review_parse_failed", { total: pairs.length }); return; }
+  const superseded = verdicts.filter((v) => v.verdict === "superseded").map((v) => {
+    const p = pairs[v.i];
+    return { old: p.old.id, new: p.new.id, sim: p.sim, oldSnippet: p.old.snippet, newSnippet: p.new.snippet };
+  });
+  audit("conflict_review", {
+    model: REVIEW_MODEL, total: pairs.length,
+    counts: verdicts.reduce((m, v) => ((m[v.verdict] = (m[v.verdict] ?? 0) + 1), m), {}),
+    supersededIds: superseded.map((s) => [s.old, s.new]),
+  });
+  if (superseded.length) announce("conflict_sweep_verified", { pairs: superseded.slice(0, 5) });
 }
 // v0.12 衍生数据统一刷新：注入层索引 + 图谱边表（规模数千条内全量重建为毫秒级，先正确后增量）
 function rebuildEdgesSafe() {

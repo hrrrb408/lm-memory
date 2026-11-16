@@ -10,7 +10,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { findConflictPairs } from "./conflict.mjs";
+import { findConflictPairs, buildReviewPrompt, parseReview } from "./conflict.mjs";
 
 const MEM_DIR = process.env.LM_MEMORY_DIR;
 if (!MEM_DIR || MEM_DIR === path.join(process.env.HOME, ".dsh", "memory")) { console.error("拒绝在真实库上跑测试"); process.exit(2); }
@@ -106,8 +106,26 @@ setEmb(idPlainRef, [0, 0, 0, 1, 0]);
 new DatabaseSync(path.join(MEM_DIR, "memory.db"))
   .prepare("UPDATE memories SET updated_at=? WHERE id=?")
   .run("2026-11-04T00:00:00.000Z", idPlainRef);
+
+// 5b) 版本发布条互撞不出对（v0.14.1：版本时间线互不推翻——真库 14 误报的主源）
+const idRelOld = idOf(await call("memory_remember", { content: "lm-memory v0.13.0 发布（commit af5b415，tag 已推）：recall 语义精修", kind: "procedure" }));
+const idRelNew = idOf(await call("memory_remember", { content: "lm-memory v0.14.0 发布（commit f172f05，tag 已推）：冲突消解扫描上线", kind: "procedure" }));
+setEmb(idRelOld, [1, 0, 0, 0, 0]);
+setEmb(idRelNew, [0.92, 0.392, 0, 0, 0]); // 与 old1 高相似且带「发布」完结词
+new DatabaseSync(path.join(MEM_DIR, "memory.db"))
+  .prepare("UPDATE memories SET updated_at=? WHERE id IN (?, ?)")
+  .run("2026-11-05T00:00:00.000Z", idRelOld, idRelNew);
+const rRel = findConflictPairs(ro, { simMin: 0.72, maxPairs: 100 });
+t("版本发布条互撞不出对", !rRel.pairs.some((p) => [p.old.id, p.new.id].includes(idRelOld) && [p.old.id, p.new.id].includes(idRelNew)), JSON.stringify(rRel.pairs.map((p) => [p.old.id, p.new.id])));
+
+// 5c) Level 2 复核纯函数
 const rStrict = findConflictPairs(ro, { simMin: 0.999, maxPairs: 100 });
 t("simMin 拉满仍保留取代性引用对", rStrict.pairs.some((p) => p.signals.includes("explicit_ref")), `total=${rStrict.total}`);
+const prompt = buildReviewPrompt([{ old: { id: 1, updated_at: "2026-11-01", snippet: "旧" }, new: { id: 2, updated_at: "2026-11-02", snippet: "新" } }]);
+t("复核 prompt 含候选对与判断标准", prompt.includes("[0]") && prompt.includes("superseded") && prompt.includes("related"));
+t("parseReview 正常解析", JSON.stringify(parseReview('[{"i":0,"verdict":"superseded"},{"i":1,"verdict":"related"}]', 2)) === '[{"i":0,"verdict":"superseded"},{"i":1,"verdict":"related"}]');
+t("parseReview 拒绝越界与非法 verdict", parseReview('[{"i":9,"verdict":"superseded"},{"i":0,"verdict":"haha"}]', 1) === null || parseReview('[{"i":9,"verdict":"superseded"},{"i":0,"verdict":"haha"}]', 1).length === 0);
+t("parseReview 坏输出返回 null", parseReview("模型胡言乱语", 2) === null);
 t("纯关联引用（无取代语境）不出对", !rStrict.pairs.some((p) => p.old.id === idOld2 && p.new.id === idPlainRef));
 
 console.log(`\n${pass} passed, ${fail} failed`);

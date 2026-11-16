@@ -96,7 +96,12 @@ main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
 .mem .top{display:flex;gap:8px;align-items:center;margin-bottom:6px}
 .badge{font-size:11px;padding:2px 8px;border-radius:999px;color:#fff;font-weight:500}
 .meta{font-size:11.5px;color:var(--muted)}
-.mem .content{font-size:14.5px}
+.mem .content{font-size:14.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.content-more summary,.group-more summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin-top:5px}
+summary:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.section-title{font-family:"Songti SC",Georgia,serif;font-size:19px;font-weight:600;margin:8px 0 0}.section-note{font-size:12.5px;color:var(--muted)}
+.profile-content{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}.group-more .plist{margin-top:8px}
+@media(max-width:680px){body{padding:24px 16px}nav{flex-wrap:wrap}.acts{flex-wrap:wrap}.prow{flex-wrap:wrap}.genbar{flex-wrap:wrap}}
 .mem .acts{margin-top:10px;display:flex;gap:12px;font-size:12.5px}
 .acts a{color:var(--muted);cursor:pointer;text-decoration:underline dotted}
 .acts a:hover{color:var(--ink)}
@@ -104,6 +109,7 @@ main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
 .editbox{width:100%;margin-top:8px;border:1px solid var(--ink);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px}
 .hist{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;font-size:13px;color:var(--muted)}
 .hist .old{text-decoration:line-through;opacity:.6}
+.sleep-note{background:#f0e9d8;border:1px solid #e0d6bd;border-radius:8px;padding:9px 13px;font-size:13px;color:#5c5546;margin-bottom:12px;overflow-wrap:anywhere}
 .empty{max-width:860px;margin:40px auto;text-align:center;color:var(--muted);font-size:14px}
 footer{max-width:860px;margin:28px auto 0;color:var(--muted);font-size:12px;text-align:center}
 nav{max-width:860px;margin:-14px auto 16px;display:flex;gap:2px;font-size:13.5px}
@@ -114,7 +120,7 @@ nav a.on{background:var(--ink);color:#fff}
 .pcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
 .pcard h3{font-family:"Songti SC",Georgia,serif;font-size:16px;font-weight:600;margin-bottom:10px;color:var(--ink)}
 .psummary{white-space:pre-wrap;font-size:14.5px;line-height:1.8}
-.psummary b{font-family:"Songti SC",Georgia,serif}
+.psummary strong{font-family:"Songti SC",Georgia,serif}
 .pchips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .pchips span{border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-size:12.5px;color:var(--muted)}
 .plist{display:flex;flex-direction:column;gap:8px}
@@ -127,6 +133,12 @@ nav a.on{background:var(--ink);color:#fff}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:680px){.two{grid-template-columns:1fr}}
 button{font:inherit}
+/* 图谱：沿用纸感色系，信息清晰优先于装饰。 */
+.graph-head{display:flex;justify-content:space-between;align-items:end;gap:16px;margin:8px 0 18px}
+.graph-head h2{font:600 25px/1.3 "Songti SC",Georgia,serif;letter-spacing:.04em}.graph-head p{color:#777267;font-size:13px;margin-top:5px}.graph-count{font-size:12px;color:#746f65;font-variant-numeric:tabular-nums;white-space:nowrap}
+.graph-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px 14px;margin-bottom:12px}.graph-tools input[type=search]{min-width:180px;padding:9px 12px}.graph-relations{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.graph-relations label,.graph-min{font-size:12px;color:#625f58;display:inline-flex;align-items:center;gap:4px}.graph-tools button,.graph-min select{border:1px solid #e2ded4;background:#fffefa;border-radius:8px;padding:7px 10px;color:#514d46;cursor:pointer}.graph-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 12px;color:#716d64;font-size:12px}.graph-legend span{display:inline-flex;align-items:center;gap:6px}.graph-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--dot)}
+#gcanvas{overflow:auto;border:1px solid #e4ded1;border-radius:14px;background:#f7f4ee}#gcanvas svg{display:block;max-width:none}.graph-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:#777267;font-size:12px;margin-top:9px}#gbar{padding:10px 12px;background:#f2eee5;border-radius:8px;margin-top:10px}
+@media(max-width:680px){.graph-head{align-items:start;flex-direction:column;gap:5px}.graph-tools input[type=search]{flex-basis:100%}}
 </style></head><body>
 <header><h1>记忆库</h1><div class="sub" id="sub"></div><div class="stats" id="stats"></div></header>
 <nav><a id="tabList" class="on" onclick="showView('list')">记忆库</a><a id="tabProfile" onclick="showView('profile')">画像</a><a id="tabDormant" onclick="showView('dormant')">休眠馆</a><a id="tabGraph" onclick="showView('graph')">图谱</a></nav>
@@ -140,6 +152,7 @@ button{font:inherit}
 <script>
 const K = ${JSON.stringify(KIND_META)};
 let filter = null, query = "";
+const fullContents = new Map();
 const $ = (s) => document.querySelector(s);
 async function load() {
   const p = new URLSearchParams();
@@ -151,7 +164,7 @@ async function load() {
   $("#stats").innerHTML = Object.entries(d.counts).map(([k, n]) =>
     \`<span class="chip \${filter === k ? "on" : ""}" data-k="\${k}"><b style="color:\${K[k]?.[1]}">\${K[k]?.[0] ?? k}</b> \${n}</span>\`).join("")
     + \`<span class="chip \${!filter ? "on" : ""}" data-k="">全部 \${d.total}</span>\`;
-  d.items.forEach((m) => { versions[m.id] = m.version ?? m.v; });
+  d.items.forEach((m) => { versions[m.id] = m.version ?? m.v; fullContents.set(m.id, m.content); });
   $("#list").innerHTML = d.items.map((m) => memCard(m)).join("");
   $("#empty").style.display = d.items.length ? "none" : "block";
 }
@@ -160,18 +173,23 @@ const memCard = (m) => {
   return \`<div class="mem" id="m\${m.id}">
     <div class="top"><span class="badge" style="background:\${color}">\${label}</span>
     <span class="meta">v\${m.version} · \${(m.date || "").slice(0, 10)} \${m.source === "auto-extract" ? "· 自动提炼" : m.source === "auto-capture" ? "· 自动采集" : ""}\${m.pinned ? " · 📌" : ""}\${m.hit_count ? " · 召回×" + m.hit_count : ""}</span></div>
-    <div class="content">\${esc(m.content)}</div>
+    <div class="content">\${foldContent(m.content)}</div>
     \${m.tags ? \`<div class="meta" style="margin-top:4px">#\${esc(m.tags.split(",").filter(t=>!t.startsWith("session:")).join(" #"))}</div>\` : ""}
     <div class="acts"><a onclick="correct(\${m.id})">修正</a><a class="danger" onclick="forget(\${m.id})">忘记</a><a onclick="hist(\${m.id})">历史</a><a onclick="pin(\${m.id}, \${m.pinned ? 0 : 1})">\${m.pinned ? "取消置顶" : "📌 置顶"}</a></div>
     <div id="extra\${m.id}"></div>
   </div>\`;
 };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const foldContent = (text) => {
+  const chars = Array.from(String(text));
+  if (chars.length <= 180) return esc(text);
+  return esc(chars.slice(0, 180).join("")) + '<details class="content-more"><summary>展开余下内容</summary>' + esc(chars.slice(180).join("")) + "</details>";
+};
 window.correct = async (id) => {
   const el = $("#extra" + id);
   if (el.dataset.on) { el.innerHTML = ""; delete el.dataset.on; return; }
   el.dataset.on = "1";
-  const m = el.closest(".mem").querySelector(".content").textContent;
+  const m = fullContents.get(id) ?? "";
   el.innerHTML = \`<textarea class="editbox" rows="2">\${esc(m)}</textarea><div style="margin-top:6px"><button onclick="doCorrect(\${id})">保存新版本</button> <span class="meta">（生成 v+1，旧版保留可审计）</span></div>\`;
 };
 window.doCorrect = async (id) => {
@@ -193,18 +211,25 @@ window.hist = async (id) => {
   el.dataset.h = "1";
   const h = await (await fetch("/api/history/" + id)).json();
   el.innerHTML = h.length <= 1 ? '<div class="hist">无历史版本</div>' :
-    h.map((v) => \`<div class="hist \${v.status === "superseded" ? "old" : ""}">v\${v.version} · \${v.status} · \${v.updated_at.slice(0, 10)}<br>\${esc(v.content.slice(0, 120))}</div>\`).join("");
+    h.map((v) => \`<div class="hist \${v.status === "superseded" ? "old" : ""}">v\${v.version} · \${v.status} · \${v.updated_at.slice(0, 10)}<br>\${foldContent(v.content)}</div>\`).join("");
 };
 window.pin = async (id, to) => { await fetch("/api/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: to ? "pin" : "unpin" }) }); if ($("#dormant").style.display !== "none") loadDormant(); else load(); };
 window.wake = async (id) => { await fetch("/api/lifecycle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: "wake" }) }); loadDormant(); };
-window.runSleep = async () => { const r = await (await fetch("/api/sleep", { method: "POST" })).json(); alert(r.msg || "done"); loadDormant(); };
+window.runSleep = async () => {
+  const r = await (await fetch("/api/sleep", { method: "POST" })).json();
+  const bar = document.createElement("div");
+  bar.className = "sleep-note";
+  bar.textContent = r.msg || "整理完成";
+  $("#dormant").prepend(bar);
+  loadDormant();
+};
 window.loadDormant = async () => {
   const d = await (await fetch("/api/dormant")).json();
   const el = $("#dormant");
   el.innerHTML = '<div class="mem"><div class="content">休眠馆：长期未被召回的记忆自动转到这里，不再参与检索与 current.md 基线，但随时可唤醒。宽限期：待办45天 · 会话60天 · 事实/经验120天 · 偏好240天（命中延期+7天/次）<div class="acts"><a onclick="runSleep()">🔄 跑一次整理</a></div></div></div>'
     + (d.items.length ? d.items.map((m) => {
       const [label, color] = K[m.kind] ?? [m.kind, "#666"];
-      return \`<div class="mem" style="opacity:.75"><div class="top"><span class="badge" style="background:\${color}">\${label}</span><span class="meta">休眠于 \${(m.updated_at || "").slice(0, 10)}\${m.hit_count ? " · 曾召回×" + m.hit_count : ""}</span></div><div class="content">\${esc(m.content)}</div><div class="acts"><a onclick="wake(\${m.id})">☀️ 唤醒</a><a onclick="pin(\${m.id}, 1)">📌 置顶并唤醒</a></div></div>\`;
+      return \`<div class="mem" style="opacity:.75"><div class="top"><span class="badge" style="background:\${color}">\${label}</span><span class="meta">休眠于 \${(m.updated_at || "").slice(0, 10)}\${m.hit_count ? " · 曾召回×" + m.hit_count : ""}</span></div><div class="content">\${foldContent(m.content)}</div><div class="acts"><a onclick="wake(\${m.id})">☀️ 唤醒</a><a onclick="pin(\${m.id}, 1)">📌 置顶并唤醒</a></div></div>\`;
     }).join("") : '<div class="empty">没有休眠记忆 🎉</div>');
 };
 $("#stats").addEventListener("click", (e) => { const k = e.target.closest(".chip")?.dataset.k; if (k === undefined) return; filter = k || null; load(); });
@@ -231,21 +256,26 @@ window.loadGraph = async () => {
   const d = await (await fetch("/api/graph")).json();
   const el = $("#graph");
   const statsTxt = d.nodes.length + " 节点 · " + d.links.length + " 边";
-  el.innerHTML = '<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
-    + '<input id="gq" type="search" placeholder="过滤节点（命中节点点亮一跳，其余退场）…" style="flex:1;min-width:180px;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:7px 12px;font:inherit;font-size:13px;outline:none">'
-    + '<span id="grep" style="display:inline-flex;gap:8px">' + ["similar", "co_tag", "ref"].map((r) =>
-        '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer"><input type="checkbox" checked data-rel="' + r + '" style="accent-color:' + REL_COLOR[r] + '">' + r + "</label>").join("") + "</span>"
-    + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)">孤儿≥<select id="gmin" style="font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:3px 6px;background:var(--card)"><option>0</option><option>1</option><option>2</option><option>3</option></select>条连接</label>'
-    + '<button id="greset" style="border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer;color:var(--muted)">复位视图</button></div>'
+  const relNames = { similar: "语义相似", co_tag: "共同标签", ref: "相互引用" };
+  el.innerHTML = '<div class="graph-head"><div><h2>记忆之间</h2><p>一条记忆，可能连接着另一段故事。</p></div><span class="graph-count">' + statsTxt + '</span></div>'
+    + '<div class="graph-tools"><input id="gq" type="search" aria-label="搜索图谱节点" placeholder="搜索节点摘要，点亮关联节点…">'
+    + '<span id="grep" class="graph-relations">' + ["similar", "co_tag", "ref"].map((r) =>
+        '<label><input type="checkbox" checked data-rel="' + r + '" style="accent-color:' + REL_COLOR[r] + '">' + relNames[r] + '</label>').join("") + '</span>'
+    + '<label class="graph-min">最少连接 <select id="gmin"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>'
+    + '<button id="greset" type="button">复位视图</button></div>'
+    + '<div class="graph-legend">' + ["fact", "procedure", "episode", "preference", "todo"].map((k) => '<span><i style="--dot:' + NODE_COLOR[k] + '"></i>' + K[k][0] + '</span>').join("") + '</div>'
     + '<div id="gcanvas"></div>'
-    + '<div id="gbar" style="margin-top:8px;display:none"><span class="meta" id="gtip"></span></div>';
+    + '<div class="graph-foot"><span>拖动节点或背景 · 滚轮缩放 · 点击节点查看关联</span><span>节点大小代表连接数量</span></div>'
+    + '<div id="gbar" style="display:none"><span class="meta" id="gtip"></span></div>';
   const wrap = $("#gcanvas");
   const W = Math.max(wrap.clientWidth - 2 || 858, 600), H = 680;
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("width", W); svg.setAttribute("height", H);
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-  svg.style.cssText = "background:" + PAPER + ";border:1px solid var(--line);border-radius:14px;touch-action:none;display:block";
+  svg.style.cssText = "background:" + PAPER + ";touch-action:pan-y;display:block";
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "记忆关系图，节点按记忆类型着色");
 
   // 初始布局：kind 五簇分区（簇心均匀分布在大圆上，簇内高斯散布）→ 聚簇感先于力导
   const kinds = ["fact", "procedure", "episode", "preference", "todo"];
@@ -275,7 +305,7 @@ window.loadGraph = async () => {
       if ((l.weight || 1) < 1.5 && l.rel !== "similar") continue;
       let dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
       const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
-      const f = (dist - 64) * 0.03 * cool;
+      const f = (dist - 105) * 0.014 * cool;
       dx /= dist; dy /= dist;
       l.s.x += dx * f; l.s.y += dy * f; l.t.x -= dx * f; l.t.y -= dy * f;
     }
@@ -320,7 +350,7 @@ window.loadGraph = async () => {
       lbl = document.createElementNS(NS, "text");
       lbl.setAttribute("x", n.x + side * (r + 5)); lbl.setAttribute("y", n.y + 3.5);
       lbl.setAttribute("text-anchor", side < 0 ? "end" : "start");
-      lbl.setAttribute("font-size", "9.5");
+      lbl.setAttribute("font-size", "11");
       lbl.setAttribute("fill", INK_TXT);
       lbl.setAttribute("paint-order", "stroke");
       lbl.setAttribute("stroke", PAPER);
@@ -338,12 +368,13 @@ window.loadGraph = async () => {
     };
     cEl.addEventListener("mousedown", (ev) => { dnd.n = { n, setPos }; dnd.sx = ev.clientX; dnd.sy = ev.clientY; dnd.moved = false; ev.preventDefault(); ev.stopPropagation(); });
     cEl.addEventListener("click", () => { // 点击（非拖拽）→ 局部图谱模式切换
-      if (dnd.n && !dnd.moved) { st.focusId = st.focusId === n.id ? null : n.id; applyState(); }
+      if (!dnd.moved) { st.focusId = st.focusId === n.id ? null : n.id; applyState(); }
     });
     // hover 聚焦：点亮一跳，其余退场
     const focus = (on) => {
       const near = new Set([n.id]);
       for (const { l } of lineEls) {
+        if (!st.relOn[l.rel]) continue;
         if (l.s === n) near.add(l.t.id);
         if (l.t === n) near.add(l.s.id);
       }
@@ -353,7 +384,7 @@ window.loadGraph = async () => {
       }
       for (const { l, el: ln, base } of lineEls) {
         const touch = l.s === n || l.t === n;
-        ln.setAttribute("stroke-opacity", on ? (touch ? 0.8 : 0.03) : base);
+        ln.setAttribute("stroke-opacity", !st.relOn[l.rel] ? 0 : on ? (touch ? 0.8 : 0.03) : base);
       }
     };
     cEl.addEventListener("mouseenter", () => { if (st.focusId == null && !st.q) focus(true); });
@@ -378,13 +409,20 @@ window.loadGraph = async () => {
   }
   const applyState = () => {
     const q = st.q.trim().toLowerCase();
+    const visibleAdj = new Map();
+    for (const l of links) {
+      if (!st.relOn[l.rel]) continue;
+      if (!visibleAdj.has(l.s.id)) visibleAdj.set(l.s.id, new Set());
+      if (!visibleAdj.has(l.t.id)) visibleAdj.set(l.t.id, new Set());
+      visibleAdj.get(l.s.id).add(l.t.id); visibleAdj.get(l.t.id).add(l.s.id);
+    }
     const searching = q.length > 0;
     let hit = null;
     if (searching) {
       hit = new Set(nodes.filter((n) => (n.label + " " + n.tip).toLowerCase().includes(q)).map((n) => n.id));
-      for (const id of [...hit]) for (const m of adj.get(id) || []) hit.add(m);
+      for (const id of [...hit]) for (const m of visibleAdj.get(id) || []) hit.add(m);
     }
-    const fN = st.focusId != null ? new Set([st.focusId, ...(adj.get(st.focusId) || [])]) : null;
+    const fN = st.focusId != null ? new Set([st.focusId, ...(visibleAdj.get(st.focusId) || [])]) : null;
     for (const { n, cEl } of nodeEls) {
       const hard = n.deg < st.minDeg;
       let op;
@@ -422,8 +460,8 @@ window.loadGraph = async () => {
   svg.addEventListener("mousemove", (ev) => {
     if (dnd.n && dnd.moved) {
       const [x, y] = toSvg(ev.clientX, ev.clientY);
-      dnd.n.x = Math.max(16, Math.min(W - 16, x)); dnd.n.y = Math.max(16, Math.min(H - 16, y));
-      dnd.setPos(dnd.n.x, dnd.n.y);
+      dnd.n.n.x = Math.max(16, Math.min(W - 16, x)); dnd.n.n.y = Math.max(16, Math.min(H - 16, y));
+      dnd.n.setPos(dnd.n.n.x, dnd.n.n.y);
     } else if (dnd.n) {
       if (Math.abs(ev.clientX - dnd.sx) + Math.abs(ev.clientY - dnd.sy) > 4) dnd.moved = true;
     } else if (pan.on) {
@@ -454,36 +492,34 @@ window.loadGraph = async () => {
   for (const cb of document.querySelectorAll('#grep input[type="checkbox"]'))
     cb.addEventListener("change", () => { st.relOn[cb.dataset.rel] = cb.checked; applyState(); });
   $("#gmin").addEventListener("change", (e) => { st.minDeg = Number(e.target.value); applyState(); });
-  el.appendChild(svg);
+  wrap.appendChild(svg);
   applyState();
 };
 const KCOL = { preference: "#c8402e", fact: "#2563eb", todo: "#b45309", procedure: "#0f766e", episode: "#71717a" };
-const fmt = (t) => esc(t).split("\\n").join("<br>");
+// Only format bold after HTML escaping; never interpret the model output as HTML.
+const fmt = (t) => esc(t).replace(/\\*\\*([^*\\n]+)\\*\\*/g, "<strong>$1</strong>");
 window.loadProfile = async () => {
   const d = await (await fetch("/api/profile")).json();
   const el = $("#profile");
   const chip = (m) => {
     const c = KCOL[m.kind] ?? "#666";
-    const when = m.updated_at ? '<span class="when">' + m.updated_at.slice(0, 10) + "</span>" : "";
-    return '<div class="prow"><span class="dot" style="background:' + c + '"></span><span>' + esc(m.content) + "</span>" + when + "</div>";
+    const when = m.updated_at ? '<span class="when">' + esc(m.updated_at.slice(0, 10)) + "</span>" : "";
+    return '<div class="prow"><span class="dot" style="background:' + c + '"></span><div class="profile-content">' + foldContent(m.content) + "</div>" + when + "</div>";
   };
-  const card = (title, rows) => '<div class="pcard"><h3>' + title + '</h3><div class="plist">' + (rows || '<span class="meta">暂无</span>') + "</div></div>";
+  const card = (title, items) => {
+    const first = items.slice(0, 5).map(chip).join("") || '<span class="meta">暂无</span>';
+    const rest = items.slice(5);
+    return '<section class="pcard"><h3>' + title + ' · ' + items.length + '</h3><div class="plist">' + first + '</div>'
+      + (rest.length ? '<details class="group-more"><summary>展开其余 ' + rest.length + ' 条</summary><div class="plist">' + rest.map(chip).join("") + '</div></details>' : '') + '</section>';
+  };
   const c = d.cached;
-  let llmBlock;
-  if (c && c.summary) {
-    llmBlock = '<div class="pcard"><div class="genbar"><button onclick="regenProfile(this)">重新生成</button><span class="meta">LLM 画像 · ' + (c.generated_at || "").slice(0, 16).replace("T", " ") + '</span></div><div class="psummary">' + fmt(c.summary) + "</div></div>";
-  } else {
-    llmBlock = '<div class="pcard"><div class="genbar"><button onclick="regenProfile(this)">生成 LLM 画像</button><span class="meta">把 ' + (d.identity.length + d.preferences.length + d.procedures.length) + " 条记忆交给模型蒸馏成一段肖像</span></div></div>";
-  }
-  const ongoing = d.identity.filter((m) => /lm-memory|项目|dsh-ui/.test(m.content));
-  el.innerHTML = llmBlock
-    + '<div class="two">'
-    + card("偏好", d.preferences.map(chip).join(""))
-    + card("待办与正在做的事", d.todos.concat(ongoing).map(chip).join(""))
-    + "</div>"
-    + card("事实与环境", d.identity.map(chip).join(""))
-    + card("经验教训", d.procedures.map(chip).join(""))
-    + (d.episodes.length ? card("最近足迹", d.episodes.map(chip).join("")) : "");
+  const notice = '<p class="section-note">画像是生成时的快照，可能过期或不准确，请以原始条目为准。生成或重新生成时，最多 1000 条有效记忆的类别与内容（截取前 30000 字符）会发送至智谱开放平台外部模型，请确认隐私风险。</p>';
+  const llmBlock = '<section class="pcard"><div class="genbar"><button onclick="regenProfile(this)">' + (c && c.summary ? '重新生成' : '生成 LLM 画像') + '</button><span class="meta">' + (c && c.summary ? '生成于 ' + esc((c.generated_at || "").slice(0, 16).replace("T", " ")) : '尚未生成') + '</span></div>' + notice + (c && c.summary ? '<div class="psummary">' + fmt(c.summary) + '</div>' : '') + '</section>';
+  el.innerHTML = '<h2 class="section-title">画像概览</h2>' + llmBlock
+    + '<h2 class="section-title">原始记忆条目</h2><p class="section-note">按记忆类别分组；每组默认显示 5 条，可展开查看更多。</p>'
+    + '<div class="two">' + card("偏好", d.preferences) + card("待办", d.todos) + '</div>'
+    + card("事实与环境", d.identity) + card("经验教训", d.procedures)
+    + (d.episodes.length ? card("最近足迹", d.episodes) : '');
 };
 window.regenProfile = async (btn) => {
   btn.disabled = true; btn.textContent = "蒸馏中…";
@@ -542,7 +578,7 @@ http.createServer(async (req, res) => {
       return json({
         cached: cachedProfile(),
         identity: by("fact"), preferences: by("preference"), todos: by("todo"),
-        procedures: by("procedure"), episodes: by("episode").slice(-5).reverse(),
+        procedures: by("procedure"), episodes: by("episode").sort((a, b) => String(b.updated_at || b.date || "").localeCompare(String(a.updated_at || a.date || "")) || b.id - a.id).slice(0, 5),
       });
     }
     if (req.method === "POST" && u.pathname === "/api/profile/refresh") {
