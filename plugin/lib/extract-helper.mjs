@@ -61,6 +61,8 @@ if (!KEY) { // 无 key：优雅降级——跳过提炼（检索不受影响）�
 }
 
 async function llm(prompt) {
+  // v0.16 失败感知（第七轮外审实锤：LLM 连续失败返回空串 → items=[] → exit 0 删任务 = 永久漏记）：
+  // 失败返回 null（与「成功返回空内容」严格区分），调用方必须将 null 视为任务失败保留重跑。
   for (let i = 0; i < 3; i++) {
     try {
       const r = await fetch(`${BASE}/chat/completions`, {
@@ -68,13 +70,21 @@ async function llm(prompt) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${KEY}` },
         body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2500, temperature: 0 }),
       });
-      const t = (await r.json()).choices?.[0]?.message?.content ?? "";
-      if (t) return t;
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const t = (await r.json()).choices?.[0]?.message?.content;
+      if (typeof t === "string") return t; // 空串也是合法响应（模型判空）；只有网络/HTTP/解析失败才走重试
     } catch {}
     await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
   }
-  return "";
+  return null; // 3 次重试后仍失败
 }
+// 任务失败：保留 job 文件（server 孤儿回收会重跑；幂等由候选 eid 保证）+ 非零退出。
+// 覆盖：LLM 调用失败 / rev 写回失败 / 候选入队失败——绝不把「没提炼成」伪装成「成功跑完」（第七轮外审 §4）。
+const failJob = (op, detail) => {
+  audit(op, { sessionId: job.sessionId, ...detail });
+  console.error(`[extract] ${job.sessionId}: ${op} ${JSON.stringify(detail)} —— job 保留待重跑`);
+  process.exit(1);
+};
 
 // —— v0.15 外发前防线（单一事实源 server/guards.mjs）：剔除「别记」消息、脱敏疑似凭据消息。
 // 修复外审实锤：「原始文本先写 job → 直接进远程 prompt，SECRET 正则只查输出」。
@@ -83,24 +93,29 @@ const texts = filt.texts;
 if (filt.dropped || filt.redacted) audit("extract_input_filtered", { sessionId: job.sessionId, dropped: filt.dropped, redacted: filt.redacted });
 if (!texts.length) { audit("extract_skipped_all_filtered", { sessionId: job.sessionId }); fs.rmSync(jobPath, { force: true }); process.exit(0); }
 
-// —— v0.15 窗口策略：尾部优先。修复外审实锤「只读前 30 条，末尾纠正早先说法完全不进上下文」：
-// 预算内从最新往回收集，保证末尾（含最终纠正）在场；头部保留首条做背景；中间省略并显式标注。
-function pickWindow(arr, budget = 8000, per = 500) {
-  const items = arr.map((t, i) => ({ i, t: String(t).slice(0, per) }));
+// —— v0.16 窗口策略：先选窗、后截断（第七轮外审实锤：旧版先对每条取前 500 字再选窗，
+// 尾部纠正若落在单条 500 字之后照样丢失）。预算按原文长度从最新往回收，保证末尾在场；
+// 选中条目的截断保两头（头 400 + 尾 800）——纠正语境常在尾部；头部保留首条做背景；中间省略显式标注。
+function clipTwoEnds(t, head = 400, tail = 800) {
+  const s = String(t);
+  return s.length <= head + tail ? s : `${s.slice(0, head)}……（中段省略）……${s.slice(-tail)}`;
+}
+function pickWindow(arr, budget = 8000) {
+  const items = arr.map((t, i) => ({ i, len: String(t).length }));
   if (!items.length) return "";
   const kept = [];
   let used = 0;
   for (let j = items.length - 1; j >= 0; j--) {
-    const cost = items[j].t.length + 8;
+    const cost = items[j].len + 8;
     if (used + cost > budget && kept.length) break;
     kept.unshift(items[j]); used += cost;
   }
-  if (kept[0] && kept[0].i !== 0 && used + items[0].t.length + 8 <= budget + 500) { kept.unshift(items[0]); used += items[0].t.length + 8; } // 头部背景
+  if (kept[0] && kept[0].i !== 0 && used + items[0].len + 8 <= budget + 500) { kept.unshift(items[0]); used += items[0].len + 8; } // 头部背景
   const parts = [];
   let prev = null;
   for (const k of kept) {
     if (prev !== null && k.i > prev + 1) parts.push(`……（第 ${prev + 2}-${k.i} 条省略）……`);
-    parts.push(`${k.i + 1}. ${k.t}`);
+    parts.push(`${k.i + 1}. ${clipTwoEnds(arr[k.i])}`);
     prev = k.i;
   }
   return parts.join("\n");
@@ -122,8 +137,9 @@ ${transcript}
 - 输出纯 JSON 数组，如 [{"kind":"preference","content":"..."}]`;
 
 const raw = await llm(prompt);
+if (raw === null) failJob("extract_llm_failed", { stage: "facts" }); // v0.16：LLM 失败≠空结果，任务保留重跑
 let items = [];
-try { items = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]"); } catch {}
+try { items = JSON.parse((raw ?? "[]").match(/\[[\s\S]*\]/)?.[0] ?? "[]"); } catch {}
 
 // —— 会话摘要卡（v0.9）：1-2 句带日期感的自包含总结，作为 episode 候选入库 ——
 const summaryPrompt = `以下是用户与 AI 助手的一次会话中，用户的原始发言（按顺序编号，中间可能有省略标注）：
@@ -136,7 +152,11 @@ ${transcript}
 - 相对时间（昨天/上周/明天等）必须换算成绝对日期再写入（以会话日期 ${job.date} 为锚）
 - 直接输出总结正文，不要任何前缀、引号或解释`;
 let summary = "";
-try { summary = (await llm(summaryPrompt)).trim().replace(/^["'「『]|["'」』]$/g, "").slice(0, 500); } catch {}
+{
+  const s = await llm(summaryPrompt);
+  if (s === null) failJob("extract_llm_failed", { stage: "summary" }); // 摘要失败同样保留重跑（提炼候选 eid 幂等，重跑不重复入库）
+  summary = s.trim().replace(/^["'「『]|["'」』]$/g, "").slice(0, 500);
+}
 
 // —— 产出候选（不碰库）：追加 pending-memories.jsonl，server 统一提交入口消费。
 // v0.15.3 身份连续性（复核实锤：旧 job 重跑换新 eid+刷新时间 → 退回新摘要）：
@@ -151,7 +171,10 @@ try { summary = (await llm(summaryPrompt)).trim().replace(/^["'「『]|["'」』
 let JOB_REV = job.rev;
 if (!JOB_REV) {
   JOB_REV = new Date().toISOString();
-  try { fs.writeFileSync(jobPath, JSON.stringify({ ...job, rev: JOB_REV })); } catch (e) { console.error(`[extract] legacy rev write-back failed: ${e.message}`); }
+  // v0.16（第六轮收尾验收边界收口）：写回失败不再降级内存身份——保留 job + 失败退出，
+  // 下次运行重新尝试写回（复核实锤：内存身份重跑即换，不是安全恢复）。
+  try { fs.writeFileSync(jobPath, JSON.stringify({ ...job, rev: JOB_REV })); }
+  catch (e) { failJob("extract_rev_writeback_failed", { error: String(e.message || e).slice(0, 80) }); }
 }
 const candEid = (kind, content) => "h-" + createHash("sha256").update(`${job.sessionId}|${JOB_REV}|${kind}|${content}`).digest("hex").slice(0, 24);
 const appendCandidate = (kind, content, tags) => { try { fs.appendFileSync(CANDIDATES, JSON.stringify({ eid: candEid(kind, content), sessionId: job.sessionId, date: job.date, kind, content: String(content).slice(0, 2000), tags, capturedAt: JOB_REV, extractedAt: new Date().toISOString(), eventDate: job.date }) + "\n"); return true; } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; } };
@@ -169,9 +192,7 @@ if (summary && !checkSecret(summary)) {
 }
 audit("extract_done", { sessionId: job.sessionId, llmItems: items.length, candidates, rejected, enqueueFailed, summary: summaryQueued ? 1 : 0, filteredIn: texts.length, filteredOut: (job.texts || []).length - texts.length });
 if (enqueueFailed > 0) { // 未安全落盘的候选：保留 job 供重跑，非零退出（绝不假装成功）
-  audit("extract_enqueue_failed_job_preserved", { sessionId: job.sessionId, enqueueFailed });
-  console.error(`[extract] ${job.sessionId}: ${enqueueFailed} 条候选入队失败——job 保留待重跑`);
-  process.exit(1);
+  failJob("extract_enqueue_failed_job_preserved", { enqueueFailed });
 }
 fs.rmSync(jobPath, { force: true });
 console.error(`[extract] ${job.sessionId}: ${items.length} 条提炼, ${candidates} 候选入队, ${rejected} 凭据拒收`);

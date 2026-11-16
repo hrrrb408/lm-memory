@@ -605,9 +605,21 @@ load();
 </script></body></html>`;
 
 http.createServer(async (req, res) => {
-  const json = (d, code = 200) => { res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" }); res.end(JSON.stringify(d)); };
+  const json = (d, code = 200) => { res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(d)); };
   try {
     const u = new URL(req.url, "http://x");
+    // v0.16 访问边界（第七轮外审实锤：无 Origin 校验 + ACAO:* → 恶意网页可跨站 POST 删除记忆）。
+    // 本地管理页：非空 Origin 必须是本机来源；Host 必须是本机地址（同时防 DNS rebinding）。
+    // 移除 ACAO:*——viewer 页面与 API 同源，合法使用不需要 CORS。
+    const origin = req.headers.origin;
+    if (origin) {
+      let oHost = "";
+      try { oHost = new URL(origin).hostname; } catch {}
+      if (!["127.0.0.1", "localhost", "[::1]"].includes(oHost)) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
+    }
+    const host = String(req.headers.host || "");
+    const hostName = host.replace(/:\d+$/, "");
+    if (!["127.0.0.1", "localhost", "[::1]", ""].includes(hostName)) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden host"); }
     if (req.method === "GET" && u.pathname === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       return res.end(PAGE);

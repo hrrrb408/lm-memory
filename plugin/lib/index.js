@@ -154,12 +154,15 @@ function dispatchExtraction(session, texts, config) {
     if (config?.extract === false || config?.allowRemote === false || texts.length < 2) return;
     const jobsDir = path.join(MEM_DIR, "extraction-jobs");
     fs.mkdirSync(jobsDir, { recursive: true });
-    const jobFile = path.join(jobsDir, `${session.id}.json`);
+    // v0.16 文件名带 rev（第七轮外审实锤竞态：文件名固定为 sessionId 时，续聊的新 dispatch 覆盖同一路径，
+    // 旧 worker（仍在跑几十秒 LLM）完成时 rmSync 删掉的是【新任务】）——rev 入名 = 每次派发独立文件，互不覆盖。
+    const rev = new Date().toISOString();
+    const jobFile = path.join(jobsDir, `${session.id}-${rev}.json`);
     fs.writeFileSync(jobFile, JSON.stringify({
       sessionId: session.id,
-      rev: new Date().toISOString(), // v0.15.3 来源 revision：job 创建时固定——重跑同 job 复用同一 rev，
+      rev, // v0.15.3 来源 revision：job 创建时固定——重跑同 job 复用同一 rev，
       // 候选 eid 与版本序都从它派生（复核实锤：helper 每次跑换新身份+刷新时间，旧 job 重跑会退回新摘要）
-      date: new Date().toISOString().slice(0, 10),
+      date: new Date().toLocaleDateString("sv"),
       cwd: session.header?.cwd ?? "",
       texts,
       llm: typeof config?.llm === "object" ? config.llm : {}, // {model, baseURL, apiKeyEnv} 显式配置优先
@@ -190,7 +193,7 @@ function capture(session, config) {
     const min = Number.isFinite(config?.minUserMessages) ? config.minUserMessages : 2;
     if (texts.length < min) return;
     const cwd = session.header?.cwd ?? session.meta?.cwd ?? "";
-    const date = new Date().toISOString().slice(0, 10);
+    const date = new Date().toLocaleDateString("sv"); // v0.16 本地时区日期（第七轮外审实锤：UTC 截断使凌晨写入的日期回退一天）
     const first = texts[0].replace(/\s+/g, " ").slice(0, 120);
     const last = texts[texts.length - 1].replace(/\s+/g, " ").slice(0, 80);
     const rec = {

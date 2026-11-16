@@ -229,6 +229,7 @@ async function backfillEmbeddings() {
 }
 
 const now = () => new Date().toISOString();
+const localDate = () => new Date().toLocaleDateString("sv"); // v0.16 本地时区日期（第七轮外审实锤：UTC 截日期使东八区凌晨写入回退一天）
 function audit(op, data = {}) {
   const rec = { ts: now(), op, by: "mcp:lm-memory", ...data };
   try { fs.appendFileSync(LOG_PATH, JSON.stringify(rec) + "\n"); } catch {}
@@ -249,6 +250,26 @@ const OUTBOX_READY = (() => {
     return true;
   } catch (e) { console.error("[memory] outbox init:", e.message); return false; }
 })();
+// v0.16 提炼任务账本（第七轮外审指定：任务持久状态机，让「有没有漏记」成为可查询状态）：
+// 观察点维护——①孤儿回收重跑时 UPSERT running/attempts+1（超限 failed 并移 failed/ 归档）；
+// ②ingestCandidates 消费到该 (session_id, revision) 的候选时 UPSERT done。
+// 任务本体是 extraction-jobs/ 下带 rev 的 job 文件；账本记录其生命周期供查询，不承担恢复职责。
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS extract_jobs (
+    session_id TEXT NOT NULL, revision TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0, last_note TEXT, updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, revision))`);
+} catch (e) { console.error("[memory] extract_jobs ledger init:", e.message); }
+function ledgerUpsert(sessionId, revision, status, note = "") {
+  try {
+    db.prepare(`INSERT INTO extract_jobs (session_id, revision, status, attempts, last_note, updated_at) VALUES (?,?,?,1,?,?)
+      ON CONFLICT(session_id, revision) DO UPDATE SET status=excluded.status,
+        attempts = CASE WHEN excluded.status='running' THEN extract_jobs.attempts + 1 ELSE extract_jobs.attempts END,
+        last_note=excluded.last_note, updated_at=excluded.updated_at`)
+      .run(String(sessionId), String(revision), status, String(note).slice(0, 80), now());
+  } catch (e) { console.error("[memory] ledger upsert:", e.message); }
+}
 const clip200 = (s) => String(s ?? "").slice(0, 200);
 // 事务内插入事件（调用方负责 BEGIN/COMMIT）：内容变更与事件同一 SQLite 事务，崩溃窗口消除。
 // eid = 稳定事件身份：至少一次投递下，消费端按 eid 去重（跨 offset 重发也只应用一次）。
@@ -256,7 +277,9 @@ function outboxInsert(op, data = {}) {
   db.prepare("INSERT INTO outbox (eid, ts, op, payload) VALUES (?,?,?,?)").run(randomUUID(), now(), op, JSON.stringify(data));
 }
 function announce(op, data = {}) {
-  if (!OUTBOX_READY) { try { fs.appendFileSync(CHANGES_PATH, JSON.stringify({ ts: now(), op, ...data }) + "\n"); } catch {} return; }
+  if (!OUTBOX_READY) { // v0.16：降级直写也带 eid（第七轮外审：无 eid 事件重放时插件无法去重）。内存 eid 跨重启不持久——降级模式的已知限制
+    try { fs.appendFileSync(CHANGES_PATH, JSON.stringify({ ts: now(), op, eid: randomUUID(), ...data }) + "\n"); } catch {} return;
+  }
   try { outboxInsert(op, data); } // 单条事务（隐式），事件自身原子
   catch (e) { console.error("[memory] outbox insert failed:", e.message); return; }
   flushOutbox(); // 同步尽力投递；失败留队，启动/召回/巡检/下次 announce 补发
@@ -394,7 +417,7 @@ function commitMemoryTx({ kind, content, tags = "", source = "agent", createdAt,
   const dup = db.prepare("SELECT id, version FROM memories WHERE status='active' AND content = ?").get(c);
   if (dup) { audit("commit_dedup", { id: dup.id, source }); return { ok: false, reason: "exists", id: dup.id }; }
   const t = now();
-  const ed = eventDate || String(createdAt || t).slice(0, 10);
+  const ed = eventDate || localDate(); // v0.16：默认日期取本地时区（此前取 UTC ISO 截断，凌晨差一天）；显式 eventDate 优先
   db.exec("BEGIN");
   let id;
   try {
@@ -415,7 +438,10 @@ async function commitEmbed(id, content) {
   const ve = await embedEn(content);
   if (ve) db.prepare("UPDATE memories SET emb_en = ? WHERE id = ?").run(Buffer.from(ve.buffer, ve.byteOffset, ve.byteLength), id);
 }
-function commitFlush() { regenerateCurrentMd(); rebuildEdgesSafe(); }
+function commitFlush() { // v0.16：派生视图失败不阻断主流程（DB 是事实源），但记审计供自愈观察
+  try { regenerateCurrentMd(); } catch (e) { console.error("[memory] regenerateCurrentMd failed:", e.message); audit("current_md_write_failed", { error: String(e.message).slice(0, 80) }); }
+  try { rebuildEdgesSafe(); } catch (e) { console.error("[memory] rebuildEdges failed:", e.message); }
+}
 
 // 队列消费协议（故障不变量：任何失败路径都保留最后一份可恢复输入，复核实锤旧版并回失败仍删快照）：
 // ① 恢复：.processing 并回主文件——并回失败则原样保留 .processing 并返回，绝不删除未落盘数据
@@ -486,11 +512,17 @@ function ingestCandidates() {
         if (candRev && oldRev && candRev <= oldRev) { db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey); return true; }
       }
       const c = commitMemoryTx({ kind: rec.kind, content: rec.content, tags, source: "auto-extract", createdAt: rec.capturedAt, eventDate: rec.eventDate, announceOp: old ? "correct" : "remember", supersedesId: old?.id });
-      if (c.ok || ["exists", "secret", "too_short"].includes(c.reason)) db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey);
+      if (c.ok || ["exists", "secret", "too_short"].includes(c.reason)) {
+        db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey);
+        if ((c.ok || c.reason === "exists") && rec.capturedAt) ledgerUpsert(sid, rec.capturedAt, "done", "summary-consumed"); // v0.16 状态机：候选落库/已落库 → done
+      }
       return c.ok || c.reason === "exists" || c.reason === "secret" || c.reason === "too_short";
     }
     const c = commitMemoryTx({ kind: rec.kind, content: rec.content, tags, source: "auto-extract", createdAt: rec.capturedAt, eventDate: rec.eventDate });
-    if (c.ok || ["exists", "secret", "too_short"].includes(c.reason)) db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey);
+    if (c.ok || ["exists", "secret", "too_short"].includes(c.reason)) {
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey);
+      if ((c.ok || c.reason === "exists") && rec.capturedAt) ledgerUpsert(sid, rec.capturedAt, "done", "candidates-consumed"); // exists 也是「已落库」合法终态（同文重放）
+    }
     return c.ok || c.reason === "exists" || c.reason === "secret" || c.reason === "too_short"; // 查重/凭据/过短=终态，不重试（否则死循环重读）
   });
   if (r.read) audit("ingest_candidates", r);
@@ -536,7 +568,10 @@ server.registerTool("memory_remember", {
   const r = commitMemoryTx({ kind, content, tags, source: "agent", eventDate: event_date }); // v0.15 统一提交入口（凭据拦截/查重/事务/热流同路径）
   if (!r.ok) {
     if (r.reason === "secret") return ok(`REFUSED: 内容疑似凭据。秘密不入记忆库。`);
-    if (r.reason === "exists") return ok(`EXISTS: 已有相同记忆 id=${r.id}，未重复写入。`);
+    if (r.reason === "exists") { // v0.16 自愈（第七轮外审实锤：首次写入时派生视图写失败 → 事后重试只回 EXISTS，current.md 永久缺）——EXISTS 分支幂等补修
+      try { commitFlush(); } catch (e) { console.error("[memory] heal flush on EXISTS:", e.message); }
+      return ok(`EXISTS: 已有相同记忆 id=${r.id}，未重复写入。`);
+    }
     return ok("ERROR: 内容过短（≥3 字符）。");
   }
   await commitEmbed(r.id, content.trim());
@@ -869,32 +904,51 @@ ingestAll(); // 启动即消化采集卡与提炼候选队列（v0.15 统一提�
 if (EMB_ENABLED) { void getEmbedder().then(() => getEmbedderEn()); void backfillEmbeddings(); } // 启动即预热双模型 + 后台回填（空库时 backfill 无活，预热让首次写入免付冷启动）
 try { const sr = sleepPassAnnounced(); } catch (e) { console.error("[memory] startup sleep pass:", e.message); } // v0.7 启动整理
 setInterval(() => { try { ingestAll(); sleepPassAnnounced(); void backfillEmbeddings(); } catch {} }, 12 * 3600 * 1000).unref(); // 每 12h 巡检：消化队列 + 休眠整理 + 补嵌
-void (async () => { // 孤儿提炼任务回收：宿主退出时派发的任务若未能执行，这里补跑（>2 分钟旧的，最多 3 个）
-  try {
-    if (process.env.LM_REMOTE_DISABLED === "1") { // v0.15.1 系统级禁外发：孤儿任务保留不外呼，不删除（恢复远程后可再跑）
+void (async () => { // 提炼任务回收：遗留 job（孤儿/LLM 失败/入队失败保留的）重跑；带账本与重试上限（v0.16 状态机）
+  const MAX_ATTEMPTS = 5;
+  const respawnOldJobs = async (label) => {
+    try {
       const jobsDir = path.join(MEM_DIR, "extraction-jobs");
-      const n = fs.existsSync(jobsDir) ? fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).length : 0;
-      if (n) audit("orphan_jobs_preserved_remote_disabled", { count: n });
-      return;
-    }
-    const jobsDir = path.join(MEM_DIR, "extraction-jobs");
-    if (!fs.existsSync(jobsDir)) return;
-    const { spawn } = await import("node:child_process");
-    const cand = fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).map((f) => path.join(jobsDir, f))
-      .filter((f) => Date.now() - fs.statSync(f).mtimeMs > 120000).slice(0, 3);
-    if (!cand.length) return;
-    const helper = [
-      path.join(MEM_DIR, "plugin", "dsh-lm-capture", "lib", "extract-helper.mjs"), // 旧手工部署
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/lib/extract-helper.mjs"), // 包形态（server/ → ../plugin/lib）
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/dsh-lm-capture/lib/extract-helper.mjs"), // 旧手工部署（server/ 同级）
-    ].find((p) => fs.existsSync(p));
-    if (!helper) return;
-    for (const job of cand) {
-      const ch = spawn(process.execPath, [helper, job], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
-      ch.unref();
-    }
-    audit("orphan_jobs_respawn", { count: cand.length });
-  } catch (e) { console.error("[memory] orphan respawn:", e.message); }
+      if (!fs.existsSync(jobsDir)) return;
+      if (process.env.LM_REMOTE_DISABLED === "1") { // v0.15.1 系统级禁外发：孤儿任务保留不外呼，不删除（恢复远程后可再跑）
+        const n = fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).length;
+        if (n) audit("orphan_jobs_preserved_remote_disabled", { count: n });
+        return;
+      }
+      const { spawn } = await import("node:child_process");
+      const cand = fs.readdirSync(jobsDir).filter((f) => f.endsWith(".json")).map((f) => path.join(jobsDir, f))
+        .filter((f) => Date.now() - fs.statSync(f).mtimeMs > 120000).slice(0, 3);
+      if (!cand.length) return;
+      const helper = [
+        path.join(MEM_DIR, "plugin", "dsh-lm-capture", "lib", "extract-helper.mjs"), // 旧手工部署
+        path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/lib/extract-helper.mjs"), // 包形态（server/ → ../plugin/lib）
+        path.join(path.dirname(fileURLToPath(import.meta.url)), "../plugin/dsh-lm-capture/lib/extract-helper.mjs"), // 旧手工部署（server/ 同级）
+      ].find((p) => fs.existsSync(p));
+      if (!helper) return;
+      const failedDir = path.join(jobsDir, "failed");
+      for (const jobFile of cand) {
+        let sid = path.basename(jobFile), rev = "";
+        try { const j = JSON.parse(fs.readFileSync(jobFile, "utf8")); sid = j.sessionId; rev = j.rev || ""; } catch {}
+        // 账本：重试计数；超限 → failed 状态 + 归档到 failed/（不再自动重跑，可查询可人工重试）
+        let prior = null;
+        try { prior = db.prepare("SELECT attempts FROM extract_jobs WHERE session_id=? AND revision=?").get(sid, rev || "unknown"); } catch {}
+        const attempts = (prior?.attempts ?? 0) + 1;
+        if (attempts > MAX_ATTEMPTS) {
+          fs.mkdirSync(failedDir, { recursive: true });
+          try { fs.renameSync(jobFile, path.join(failedDir, path.basename(jobFile))); } catch {}
+          ledgerUpsert(sid, rev || "unknown", "failed", `attempts>${MAX_ATTEMPTS}`);
+          audit("extract_job_failed_terminal", { sessionId: sid, revision: rev, attempts });
+          continue;
+        }
+        ledgerUpsert(sid, rev || "unknown", "running", `respawn#${attempts}`);
+        const ch = spawn(process.execPath, [helper, jobFile], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
+        ch.unref();
+      }
+      audit("orphan_jobs_respawn", { count: cand.length, by: label });
+    } catch (e) { console.error("[memory] orphan respawn:", e.message); }
+  };
+  void respawnOldJobs("startup");
+  setInterval(() => { void respawnOldJobs("interval"); }, 30 * 60 * 1000).unref(); // 每 30 分钟回收一轮（原为启动一次性 + 12h 巡检）
 })();
 await server.connect(transport);
 audit("server_started", { db: DB_PATH, pid: process.pid });

@@ -12,7 +12,8 @@ lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记
 
 | 能力 | 说明 |
 |---|---|
-| **统一提交入口（v0.15）** | MCP / 采集卡 / 提炼候选三路写入收敛为同一条事务路径（`commitMemoryTx`）；提炼 helper **无独立写库权**，只产候选队列由 server 消费——凭据拦截、查重、嵌入、索引、图谱全覆盖。**持久 outbox（v0.15.2）**：remember/correct/forget/pin/wake/sleep 的内容变更与事件均在同一 SQLite 事务（事件写失败则内容一起回滚）；热流投递为**至少一次**，事件带稳定 `eid`，消费端按 eid 同批+跨 offset 去重。候选身份从 job 来源 revision 确定性派生（eid=hash(sessionId·rev·kind·content)，版本序锚=job 派发时间而非提炼完成时间）——**同一 job 重跑不换身份**，已消费候选重放/旧 job 重跑都不会退回新摘要；升级兼容：无 rev 的旧任务首跑时把迁移 revision 写回 job 文件（写回失败则降级为本次运行内身份，见已知边界）；摘要更新有**版本序约束**（旧 revision 不覆盖新 revision）。队列带 rename 快照 + `.processing` 崩溃恢复 + 失败保留（绝不删除未落盘数据） |
+| **提炼任务状态机（v0.16）** | 任务持久化：job 文件名含 rev（消除续聊竞态——旧 worker 删不到新任务）；LLM 调用失败返回 null ≠ 空结果，任务保留 + 非零退出；server 每 30 分钟回收遗留任务（attempts 计数，超 5 次转 failed 归档 `extraction-jobs/failed/`）；SQLite `extract_jobs` 账本（running/done/failed，「有没有漏记」可查询）；rev 写回失败同样保留任务（不再降级内存身份） |
+| **统一提交入口（v0.15）** | MCP / 采集卡 / 提炼候选三路写入收敛为同一条事务路径（`commitMemoryTx`）；提炼 helper **无独立写库权**，只产候选队列由 server 消费——凭据拦截、查重、嵌入、索引、图谱全覆盖。**持久 outbox（v0.15.2）**：remember/correct/forget/pin/wake/sleep 的内容变更与事件均在同一 SQLite 事务（事件写失败则内容一起回滚）；热流投递为**至少一次**，事件带稳定 `eid`，消费端按 eid 同批+跨 offset 去重。候选身份从 job 来源 revision 确定性派生（eid=hash(sessionId·rev·kind·content)，版本序锚=job 派发时间而非提炼完成时间）——**同一 job 重跑不换身份**，已消费候选重放/旧 job 重跑都不会退回新摘要；升级兼容：无 rev 的旧任务首跑时把迁移 revision 写回 job 文件（写回失败保留任务待重试）；摘要更新有**版本序约束**（旧 revision 不覆盖新 revision）。队列带 rename 快照 + `.processing` 崩溃恢复 + 失败保留（绝不删除未落盘数据） |
 | **外发前脱敏（v0.15）** | `server/guards.mjs` 单一事实源：会话文本在落盘/外呼前按「别记」剔除、疑似凭据替换为占位符；MCP 写入拒绝、队列消费再拦，三道同源防线。**`allowRemote: false` 系统级禁外发（v0.15.1）**：经 shim 传播到 server——自动提炼不派发、冲突复核跳过、孤儿任务保留不外呼、viewer 画像/复核降级为空（需重启使 shim/进程重建生效） |
 | **事件时间锚（v0.15）** | 新增 `event_date` 列：recall 返回的 `date` 是事件锚（事件发生/观察日），唤醒/修正/休眠等管理操作不再推移它 |
 | **尾部优先提炼窗口（v0.15）** | 修复「只读前 30 条 → 末尾纠正进不了上下文」：预算内从最新往回收集，头部保留背景，省略段显式标注 |
@@ -176,7 +177,10 @@ llm:
 
 key 从环境变量或 `~/.dsh/.credentials.yaml` 同名条目读取；解析不到则跳过 LLM 提炼（检索功能不受影响）。已内置 provider 映射：zai-coding-cn / deepseek-official / deepseek-api-key / agnes。
 
-## 安全设计（v0.15 三入口同源防线）
+## 安全设计（v0.15 三入口同源防线；v0.16 本机访问边界）
+
+- **viewer 仅本机访问（v0.16）**：Origin 白名单（127.0.0.1/localhost/[::1]，非本机来源 403）+ Host 校验（防 DNS rebinding）+ 移除 `Access-Control-Allow-Origin:*`——本地管理页与 API 同源，合法使用不需要 CORS，恶意网页无法跨站 POST 删除记忆
+- **日期本地时区（v0.16）**：默认 event_date 取本地日期（此前 UTC 截断使东八区凌晨写入回退一天）
 
 - **凭据防线**：`server/guards.mjs` 单一事实源（MCP 写入 / 采集插件 / 提炼 helper 共用同一套模式常量）
   - MCP 写入：模式命中（`sk-…`、`api_key=…`、ghp/xox/AKIA 前缀）直接拒绝入库
@@ -201,8 +205,8 @@ key 从环境变量或 `~/.dsh/.credentials.yaml` 同名条目读取；解析不
 
 | 基准 | QA 正确率 | 检索层 |
 |---|---|---|
-| LongMemEval-S（22 题分层样本） | 0.55 | gold session 覆盖@15 = 1.00（oracle 精简证据上下文，说服力有限） |
-| LongMemEval-Oracle（36 题） | 0.64-0.67 | 同上 |
+| LongMemEval-S（22 题分层样本） | 0.55 | gold session 覆盖@15 = 1.00（摄入为完整 S 会话数据，非 oracle 精简上下文——2026-11-17 二次勘误；session 级覆盖仍不能证明答案证据齐全） |
+| LongMemEval-Oracle（36 题） | 0.64-0.67 | 同左（此组才是 oracle 精简证据上下文） |
 | LoCoMo（3 段对话 55 题） | 40/55 = **0.727** | 任一证据命中 38/54 = 0.70 · **真平均覆盖率 62.5%** · 证据全齐仅 30/54 = 55.6% |
 
 LoCoMo 分项（官方类别映射重算）：multi-hop 10/15 = **0.67** · temporal 14/15 = 0.93 · open-domain 3/10 = **0.30** · single-hop 13/15 = 0.87 · **adversarial 未进入当年测试循环（0 题）——本项目不存在任何 adversarial 成绩**。
@@ -272,7 +276,7 @@ onlyBuiltDependencies:
 - **评测可信度**：历史成绩含开发集反复调优成分，无独立 holdout；真 adversarial 能力未实测（runner 已修：cat5 走官方弃答判定——hypothesis 含「未提及/无信息」表述记对，诱导作答记错；`adversarial_answer` 是诱导项不作金标；非 cat5 仍用 LLM judge）；judge 与答题为同一模型；无同条件竞品对照（评测工具链见 `scripts/eval/`，守卫为 realpath 级）
 - **证据链**：auto-extract 记忆只有会话级来源标签（`session:X`），未定位到具体消息 span；「候选摘要直接升为事实」暂缺原文回查接口
 - **图谱**：每次写操作全量 O(N²) 相似重建（数百条实测毫秒级，`rebuild_edges` 审计含 ms 可观测；数千条后需增量方案）；图谱对答案质量的收益未做消融
-- **双列嵌入 = 语言路由**，不是跨语言召回证明（英文查询中文记忆的可靠性未测）
+- **双列嵌入 = 语言路由**，不是跨语言召回证明（英文查询中文记忆的可靠性未测）；另 bge-small 嵌入窗口约 512 token——**超长记忆（约 500+ 字）尾部语义会完全丢失**（两条 850 字、仅尾部城市不同的文本向量完全相同），长内容应拆分入库（模型固有局限）
 - LongMemEval multi-session（真·跨会话合成）仍弱
 - 单用户单机，无同步、无多用户；首次使用需联网下载嵌入模型（~56MB）
 - viewer 图谱页不支持触摸拖拽/键盘访问（本地管理工具，桌面鼠标优先）
