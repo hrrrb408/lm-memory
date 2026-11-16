@@ -85,7 +85,7 @@ function resolveNode() {
   return "node";
 }
 
-function writeServerShim() {
+function writeServerShim(config) {
   try {
     const realServer = ["../../server/memory-server.mjs", "../../../server/memory-server.mjs"]
       .map((r) => path.join(libDir(), r)).find((p) => fs.existsSync(p));
@@ -100,6 +100,8 @@ function writeServerShim() {
       "// 真实服务器路径由插件按自身安装位置写入，规避缺 DSH_PROFILE_DIR/DSH_PROFILE",
       "// 环境变量时回退 profiles/default 的 spawn ENOENT → MCP 永久断连问题。",
       'import { pathToFileURL } from "node:url";',
+      // v0.15.1 系统级禁外发：allowRemote:false 经 shim 传给 server（冲突复核/孤儿回收遵守）
+      ...(config?.allowRemote === false ? ['process.env.LM_REMOTE_DISABLED = "1"; // 插件 allowRemote:false → 系统级禁外发'] : []),
       `await import(pathToFileURL(${JSON.stringify(realServer)}).href);`,
       "",
     ].join("\n");
@@ -294,8 +296,8 @@ function refreshHook(config) {
 export default function apply(ctx, config) {
   try {
     if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
-    // MCP 稳定启动器：每次宿主启动重写，路径只依赖 HOME（见 writeServerShim 注释）
-    writeServerShim();
+    // MCP 稳定启动器：每次宿主启动重写，路径只依赖 HOME（见 writeServerShim 注释）；allowRemote 策略随 shim 传播
+    writeServerShim(config);
     // viewer 自启（config.viewer = 端口号）：先探测/升级旧版 viewer（v0.10），再确保有活的最新版
     if (config?.viewer) {
       const port = Number(config.viewer);
@@ -310,7 +312,7 @@ export default function apply(ctx, config) {
         const viewerPath = ["../../server/viewer.mjs", "../../../server/viewer.mjs"]
           .map((r) => path.join(libDir(), r)).find((p) => fs.existsSync(p));
         if (viewerPath) {
-          const ch = spawn(resolveNode(), [viewerPath, String(port)], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR } });
+          const ch = spawn(resolveNode(), [viewerPath, String(port)], { detached: true, stdio: "ignore", env: { ...process.env, LM_MEMORY_DIR: MEM_DIR, ...(config?.allowRemote === false ? { LM_REMOTE_DISABLED: "1" } : {}) } });
           ch.unref();
           log("viewer spawned on " + port);
         }

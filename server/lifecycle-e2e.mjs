@@ -9,12 +9,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { rmEvalDir } from "../scripts/eval/eval-dir-guard.mjs";
 const MEM_DIR = process.env.LM_MEMORY_DIR;
 if (!MEM_DIR || MEM_DIR === path.join(process.env.HOME, ".dsh", "memory") || MEM_DIR === path.join(process.env.HOME, ".lm-memory")) {
   console.error("拒绝在真实库上跑测试"); process.exit(2);
 }
 const DB = path.join(MEM_DIR, "memory.db");
-fs.rmSync(MEM_DIR, { recursive: true, force: true });
+rmEvalDir(MEM_DIR); // 守卫：realpath 级拒绝生产路径（v0.15.1 收敛）
 fs.mkdirSync(MEM_DIR, { recursive: true });
 
 const c = new Client({ name: "lifecycle-e2e", version: "0.15" });
@@ -69,6 +70,21 @@ const gone = db().prepare("SELECT id FROM memories WHERE id=?").get(tid2);
 t("hard=true 物理擦除（行消失）", f2.startsWith("OK") && !gone, f2);
 const log = fs.readFileSync(path.join(MEM_DIR, "log.jsonl"), "utf8");
 t("hard 删除进审计", log.includes('"hard":true'));
+
+// hard 擦除契约（复核实锤旧版被 active/dormant 过滤挡住）：
+const r6 = await call("memory_remember", { content: "擦除链测试：先软删再硬删的条目", kind: "fact" });
+const sid1 = idOf(r6);
+await call("memory_forget", { id: sid1, reason: "先软删" });
+const f3 = await call("memory_forget", { id: sid1, reason: "软删后硬删", hard: true });
+t("soft 删除后 hard=true 可擦除", f3.startsWith("OK") && !db().prepare("SELECT id FROM memories WHERE id=?").get(sid1), f3);
+const r7 = await call("memory_remember", { content: "擦除链测试：原版将被修正接棒", kind: "fact" });
+const sid2 = idOf(r7);
+await call("memory_correct", { id: sid2, expected_version: 1, content: "擦除链测试：修正版已接棒" });
+const f4 = await call("memory_forget", { id: sid2, reason: "历史版本擦除", hard: true });
+t("superseded 历史行可 hard 擦除", f4.startsWith("OK") && !db().prepare("SELECT id FROM memories WHERE id=?").get(sid2), f4);
+const chLines = fs.readFileSync(path.join(MEM_DIR, "changes.jsonl"), "utf8").split("\n").filter(Boolean).reverse();
+const lastHard = chLines.find((l) => l.includes('"hard":true'));
+t("hard 删除事件不携带被删原文（复核实锤旧版重新复制内容）", !!lastHard && !("content" in JSON.parse(lastHard)), lastHard ? lastHard.slice(0, 90) : "none");
 
 // 7) recall 的 date 字段 = event_date（管理操作后不变）
 const rec = await call("memory_recall", { id: nid });

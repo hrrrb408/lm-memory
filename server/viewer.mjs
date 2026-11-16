@@ -37,6 +37,7 @@ const ro = () => new DatabaseSync(DB_PATH, { readOnly: true });
 const rw = () => { const d = new DatabaseSync(DB_PATH); d.exec("PRAGMA busy_timeout=5000;"); return d; };
 const ZAI_KEY = () => fs.readFileSync(path.join(os.homedir(), ".dsh/.credentials.yaml"), "utf8").match(/ZAI_CODING_CN_API_KEY:\s*(\S+)/)?.[1];
 async function llm(prompt) {
+  if (process.env.LM_REMOTE_DISABLED === "1") return ""; // v0.15.1 系统级禁外发：本地模式下画像/冲突复核降级为空结果，不外呼
   const key = ZAI_KEY(); if (!key) return "";
   for (let i = 0; i < 2; i++) {
     try {

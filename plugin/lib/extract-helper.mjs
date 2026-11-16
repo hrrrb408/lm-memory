@@ -139,19 +139,28 @@ try { summary = (await llm(summaryPrompt)).trim().replace(/^["'「『]|["'」』
 
 // —— 产出候选（不碰库）：追加 pending-memories.jsonl，server 统一提交入口消费。
 // 事件锚 eventDate=会话日期（job.date）；凭据模式在出队前再拦一道（防御纵深，与 server 同源）。
-const appendCandidate = (rec) => { try { fs.appendFileSync(CANDIDATES, JSON.stringify(rec) + "\n"); return true; } catch { return false; } };
-let candidates = 0, rejected = 0;
+// 故障不变量（复核实锤旧版：追加失败仍删 job → 候选未落盘就丢失重试依据）：
+// 任一候选追加失败 → 保留 job 文件并以非零码退出；server 孤儿回收（>2 分钟）会重跑，
+// 幂等由统一提交入口的精确查重保证。
+const appendCandidate = (rec) => { try { fs.appendFileSync(CANDIDATES, JSON.stringify(rec) + "\n"); return true; } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; } };
+let candidates = 0, rejected = 0, enqueueFailed = 0;
 for (const it of items) {
   if (!it?.content || !["preference", "fact", "procedure", "todo"].includes(it.kind)) continue;
   if (checkSecret(it.content)) { rejected++; audit("extract_rejected", { sessionId: job.sessionId, reason: "secret-like" }); continue; }
   if (appendCandidate({ sessionId: job.sessionId, date: job.date, kind: it.kind, content: String(it.content).slice(0, 2000), tags: `auto,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date })) candidates++;
+  else enqueueFailed++;
 }
 let summaryQueued = false;
 if (summary && !checkSecret(summary)) {
   summaryQueued = appendCandidate({ sessionId: job.sessionId, date: job.date, kind: "episode", content: `会话摘要 ${job.date}：${summary}`, tags: `summary,session:${job.sessionId}`, capturedAt: new Date().toISOString(), eventDate: job.date });
-  if (summaryQueued) candidates++;
+  if (summaryQueued) candidates++; else enqueueFailed++;
 }
-audit("extract_done", { sessionId: job.sessionId, llmItems: items.length, candidates, rejected, summary: summaryQueued ? 1 : 0, filteredIn: texts.length, filteredOut: (job.texts || []).length - texts.length });
+audit("extract_done", { sessionId: job.sessionId, llmItems: items.length, candidates, rejected, enqueueFailed, summary: summaryQueued ? 1 : 0, filteredIn: texts.length, filteredOut: (job.texts || []).length - texts.length });
+if (enqueueFailed > 0) { // 未安全落盘的候选：保留 job 供重跑，非零退出（绝不假装成功）
+  audit("extract_enqueue_failed_job_preserved", { sessionId: job.sessionId, enqueueFailed });
+  console.error(`[extract] ${job.sessionId}: ${enqueueFailed} 条候选入队失败——job 保留待重跑`);
+  process.exit(1);
+}
 fs.rmSync(jobPath, { force: true });
 console.error(`[extract] ${job.sessionId}: ${items.length} 条提炼, ${candidates} 候选入队, ${rejected} 凭据拒收`);
 process.exit(0);

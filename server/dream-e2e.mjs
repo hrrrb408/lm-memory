@@ -10,9 +10,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findDuplicatePairs } from "./dream.mjs";
 
+import { rmEvalDir } from "../scripts/eval/eval-dir-guard.mjs";
 const MEM_DIR = process.env.LM_MEMORY_DIR;
 if (!MEM_DIR || MEM_DIR === path.join(process.env.HOME, ".dsh", "memory")) { console.error("拒绝在真实库上跑测试"); process.exit(2); }
-fs.rmSync(MEM_DIR, { recursive: true, force: true });
+rmEvalDir(MEM_DIR); // 守卫：realpath 级拒绝生产路径（v0.15.1 收敛）
 fs.mkdirSync(MEM_DIR, { recursive: true });
 
 const c = new Client({ name: "dream-e2e", version: "0.11" });
