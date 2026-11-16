@@ -278,7 +278,7 @@ async function reviewConflictsAsync(pairs) {
       try {
         const res = await fetch(REVIEW_BASE + "/chat/completions", {
           method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-          body: JSON.stringify({ model: REVIEW_MODEL, messages: [{ role: "user", content: buildReviewPrompt(pairs) }], max_tokens: 2000, temperature: 0 }),
+          body: JSON.stringify({ model: REVIEW_MODEL, messages: [{ role: "user", content: buildReviewPrompt(pairs) }], max_tokens: 8000, temperature: 0 }), // 推理模型思考先耗 token，2000 实测 content 为空（finish=length）
         });
         const t = (await res.json()).choices?.[0]?.message?.content ?? "";
         if (t) return t;
