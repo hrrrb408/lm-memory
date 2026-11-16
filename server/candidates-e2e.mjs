@@ -114,7 +114,7 @@ const mock = http.createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
-    const mark = (body.match(/R[12]MARK/) || [])[0] || null; // 重跑场景：按输入 mark 返回可区分的确定性输出
+    const mark = (body.match(/R[12]MARK|LEGACY[AB]MARK/) || [])[0] || null; // 重跑场景：按输入 mark 返回可区分的确定性输出
     res.setHeader("Content-Type", "application/json");
     const factContent = mark ? `FACT_${mark} 稳定身份测试事实` : "MOCK_HELPER_CANDIDATE 故障注入候选";
     const summaryText = mark ? `SUMMARY_${mark} 稳定身份测试摘要` : "MOCK_HELPER_SUMMARY 故障注入摘要";
@@ -180,6 +180,39 @@ t("重跑候选已落盘", fs.existsSync(queuePath) && fs.readFileSync(queuePath
     && rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_R1MARK%'").length === 0, JSON.stringify(rows("SELECT content, status FROM memories WHERE content LIKE '%SUMMARY_%'")));
   t("重跑后摘要版本数仍为 2（不新增版本）", rows("SELECT 1 FROM memories WHERE tags LIKE '%session:s-rev-test%' AND kind='episode'").length === 2);
   t("重跑的 fact 候选被稳定 eid 拦下（FACT_R1MARK 仍 1 条）", rows("SELECT 1 FROM memories WHERE content LIKE '%FACT_R1MARK%'").length === 1);
+}
+
+// 升级兼容：无 rev 的旧格式 job（v0.15.4 第五轮复核实锤：兜底时间戳不写回 → 重跑换身份退回新摘要）。
+// 流程：legacy L(无 rev) 首跑（helper 写回迁移 rev）→ 消费 → 新格式 B(rev 更晚) 取代 → 模拟遗留重跑 L → active 必须保持 B
+{
+  const llmCfg = { model: "mock", baseURL: `http://127.0.0.1:${mockPort}/v1`, apiKeyEnv: "LM_TEST_KEY" };
+  const legacyPath = path.join(jobsDir, "rev-legacy.json");
+  fs.writeFileSync(legacyPath, JSON.stringify({ sessionId: "s-legacy", date: "2026-11-17", cwd: "", texts: ["前文 LEGACYAMARK", "后文 LEGACYAMARK"], llm: llmCfg })); // 无 rev = 旧格式
+  const rlRun = await runHelper(legacyPath);
+  t("旧格式 job 首跑成功", rlRun.status === 0, `exit=${rlRun.status}`);
+  // 消费前捕获迁移 rev（消费后队列文件会被 rename 清理，必须在 call recall 之前读）
+  const legacyCand = fs.readFileSync(queuePath, "utf8").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((r) => r?.sessionId === "s-legacy" && String(r?.tags || "").startsWith("summary,")).pop();
+  t("旧格式候选携带迁移 rev 与确定性 eid", !!legacyCand?.capturedAt && /^h-/.test(legacyCand?.eid || ""), `capturedAt=${legacyCand?.capturedAt}`);
+  await call("memory_recall", { query: "触发 legacy 消费" });
+  t("旧格式摘要已入库", rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_LEGACYAMARK%'").length === 1);
+  // 新格式 B（同 session，rev 晚于迁移 rev 1 秒）取代
+  const bRev = new Date(Date.parse(legacyCand.capturedAt) + 1000).toISOString();
+  const bPath = path.join(jobsDir, "rev-legacy-b.json");
+  fs.writeFileSync(bPath, JSON.stringify({ sessionId: "s-legacy", rev: bRev, date: "2026-11-17", cwd: "", texts: ["前文 LEGACYBMARK", "后文 LEGACYBMARK"], llm: llmCfg }));
+  const rbRun = await runHelper(bPath);
+  t("新格式 B 运行成功", rbRun.status === 0, `exit=${rbRun.status}`);
+  await call("memory_recall", { query: "触发 B 消费" });
+  t("B 取代旧格式摘要（active=B）", rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_LEGACYBMARK%'").length === 1
+    && rows("SELECT 1 FROM memories WHERE status='superseded' AND content LIKE '%SUMMARY_LEGACYAMARK%'").length === 1);
+  // 模拟遗留（写回后的形态：无 rev 的原始 job 首跑时 rev 已写回文件；遗留文件即带 rev 的这份）重跑
+  fs.writeFileSync(legacyPath, JSON.stringify({ sessionId: "s-legacy", rev: legacyCand.capturedAt, date: "2026-11-17", cwd: "", texts: ["前文 LEGACYAMARK", "后文 LEGACYAMARK"], llm: llmCfg }));
+  const rerun = await runHelper(legacyPath);
+  t("遗留旧格式 job 重跑成功", rerun.status === 0, `exit=${rerun.status}`);
+  await call("memory_recall", { query: "触发 legacy 重放消费" });
+  t("重跑后 active 仍为 B（迁移 rev 写回 + eid 拦截）", rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_LEGACYBMARK%'").length === 1
+    && rows("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%SUMMARY_LEGACYAMARK%'").length === 0);
+  t("重跑后 s-legacy 摘要版本数仍为 2", rows("SELECT 1 FROM memories WHERE tags LIKE '%session:s-legacy%' AND kind='episode'").length === 2);
 }
 await new Promise((r) => mock.close(r));
 

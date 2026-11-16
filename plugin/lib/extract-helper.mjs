@@ -145,7 +145,14 @@ try { summary = (await llm(summaryPrompt)).trim().replace(/^["'「『]|["'」』
 //           server 侧 meta 记录直接丢弃；LLM 输出变了 → eid 变，但 rev 更旧，版本序约束仍然拦下
 //   capturedAt = rev（版本序锚=派发时间，非提炼完成时间）；extractedAt = 完成时间仅审计
 // 凭据模式出队前再拦一道（防御纵深，与 server 同源）。
-const JOB_REV = job.rev || new Date().toISOString(); // 旧任务文件无 rev：一次性兜底
+// v0.15.4 升级兼容（第五轮复核实锤：兜底时间戳不写回 → 旧 job 每次重跑换身份+换时间，仍会退回新摘要）：
+// 无 rev 的旧任务首次运行即把迁移 revision 写回 job 文件——此后重跑与新格式 job 等价（身份稳定）。
+// 写回失败（权限等）降级为内存 rev：本次运行身份仍一致，重跑可能换身份（旧格式边界，见 README）。
+let JOB_REV = job.rev;
+if (!JOB_REV) {
+  JOB_REV = new Date().toISOString();
+  try { fs.writeFileSync(jobPath, JSON.stringify({ ...job, rev: JOB_REV })); } catch (e) { console.error(`[extract] legacy rev write-back failed: ${e.message}`); }
+}
 const candEid = (kind, content) => "h-" + createHash("sha256").update(`${job.sessionId}|${JOB_REV}|${kind}|${content}`).digest("hex").slice(0, 24);
 const appendCandidate = (kind, content, tags) => { try { fs.appendFileSync(CANDIDATES, JSON.stringify({ eid: candEid(kind, content), sessionId: job.sessionId, date: job.date, kind, content: String(content).slice(0, 2000), tags, capturedAt: JOB_REV, extractedAt: new Date().toISOString(), eventDate: job.date }) + "\n"); return true; } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; } };
 let candidates = 0, rejected = 0, enqueueFailed = 0;

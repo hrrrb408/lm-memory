@@ -12,7 +12,7 @@ lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记
 
 | 能力 | 说明 |
 |---|---|
-| **统一提交入口（v0.15）** | MCP / 采集卡 / 提炼候选三路写入收敛为同一条事务路径（`commitMemoryTx`）；提炼 helper **无独立写库权**，只产候选队列由 server 消费——凭据拦截、查重、嵌入、索引、图谱全覆盖。**持久 outbox（v0.15.2）**：remember/correct/forget/pin/wake/sleep 的内容变更与事件均在同一 SQLite 事务（事件写失败则内容一起回滚）；热流投递为**至少一次**，事件带稳定 `eid`，消费端按 eid 同批+跨 offset 去重。候选身份从 job 来源 revision 确定性派生（eid=hash(sessionId·rev·kind·content)，版本序锚=job 派发时间而非提炼完成时间）——**同一 job 重跑不换身份**，已消费候选重放/旧 job 重跑都不会退回新摘要；摘要更新有**版本序约束**（旧 revision 不覆盖新 revision）。队列带 rename 快照 + `.processing` 崩溃恢复 + 失败保留（绝不删除未落盘数据） |
+| **统一提交入口（v0.15）** | MCP / 采集卡 / 提炼候选三路写入收敛为同一条事务路径（`commitMemoryTx`）；提炼 helper **无独立写库权**，只产候选队列由 server 消费——凭据拦截、查重、嵌入、索引、图谱全覆盖。**持久 outbox（v0.15.2）**：remember/correct/forget/pin/wake/sleep 的内容变更与事件均在同一 SQLite 事务（事件写失败则内容一起回滚）；热流投递为**至少一次**，事件带稳定 `eid`，消费端按 eid 同批+跨 offset 去重。候选身份从 job 来源 revision 确定性派生（eid=hash(sessionId·rev·kind·content)，版本序锚=job 派发时间而非提炼完成时间）——**同一 job 重跑不换身份**，已消费候选重放/旧 job 重跑都不会退回新摘要；升级兼容：无 rev 的旧任务首跑时把迁移 revision 写回 job 文件（写回失败则降级为本次运行内身份，见已知边界）；摘要更新有**版本序约束**（旧 revision 不覆盖新 revision）。队列带 rename 快照 + `.processing` 崩溃恢复 + 失败保留（绝不删除未落盘数据） |
 | **外发前脱敏（v0.15）** | `server/guards.mjs` 单一事实源：会话文本在落盘/外呼前按「别记」剔除、疑似凭据替换为占位符；MCP 写入拒绝、队列消费再拦，三道同源防线。**`allowRemote: false` 系统级禁外发（v0.15.1）**：经 shim 传播到 server——自动提炼不派发、冲突复核跳过、孤儿任务保留不外呼、viewer 画像/复核降级为空（需重启使 shim/进程重建生效） |
 | **事件时间锚（v0.15）** | 新增 `event_date` 列：recall 返回的 `date` 是事件锚（事件发生/观察日），唤醒/修正/休眠等管理操作不再推移它 |
 | **尾部优先提炼窗口（v0.15）** | 修复「只读前 30 条 → 末尾纠正进不了上下文」：预算内从最新往回收集，头部保留背景，省略段显式标注 |
