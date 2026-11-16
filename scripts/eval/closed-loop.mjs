@@ -63,7 +63,7 @@ for (let i = 0; i < items.length; i++) {
     const goldTags = new Set((item.answer_session_ids ?? []).map(String));
     evidenceHit = evidence.some((h) => String(h.tags ?? "").split(",").some((t) => goldTags.has(t)));
     await client.close();
-  } catch {} finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  } catch {} finally { fs.rmSync(dir, { recursive: true, force: true }); } // dir 来自 mkdtemp(tmpdir)，恒安全；守卫见 eval-dir-guard.mjs
 
   const Q = `问题：${item.question}\n（无法确定时只回答 UNKNOWN）`;
   const ctx = evidence.length

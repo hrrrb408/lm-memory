@@ -68,7 +68,7 @@ for (let i = 0; i < items.length; i++) {
   } catch (e) {
     results.push({ type: item.question_type, top1: false, top5: false, latency: 0, sessions: 0, error: e.message });
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true }); // dir 来自 mkdtemp(tmpdir)，恒安全；守卫见 eval-dir-guard.mjs
   }
   if ((i + 1) % 20 === 0) console.log(`  进度 ${i + 1}/${items.length}`);
 }

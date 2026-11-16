@@ -1,21 +1,26 @@
 # lm-memory 🧠
 
 > 本地优先的 Agent 长期记忆：一个 MCP server + 一个可选的 DSH 采集插件。
-> 单用户、SQLite + FTS5 + 双语本地嵌入（56MB），数据永远在你自己机器上。
+> 单用户、SQLite + FTS5 + 双语本地嵌入（56MB）：**存储与嵌入全本地**；提炼/摘要/冲突复核会把文本发给你配置的远程 LLM（插件配置 `allowRemote: false` 可完全关闭外呼）。
 
 ## 它解决什么问题
 
 换一个会话、换一个 Agent（DSH / Claude Code / 任何 MCP 宿主），AI 就失忆了。
 lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记忆层——不只是记住，还会新陈代谢。
 
-## 功能总览（v0.12）
+## 功能总览（v0.15）
 
 | 能力 | 说明 |
 |---|---|
-| **写入** | 自动去重、凭据拦截（key/token 永不入库） |
-| **检索** | FTS5 trigram 词法 + **双语语义**（bge-small-zh/en 双模型，按查询语言路由，RRF 融合） |
-| **修正/删除** | 乐观并发（expected_version）、逻辑删除、全程审计 |
-| **遗忘曲线** | 召回命中延期、按 kind 宽限期（待办45天/会话60天/事实·经验120天/偏好240天）、超期休眠（dormant，可唤醒）、置顶豁免 |
+| **统一提交入口（v0.15）** | MCP / 采集卡 / 提炼候选三路写入收敛为同一条事务路径（`commitMemoryTx`）；提炼 helper **无独立写库权**，只产候选队列由 server 消费——凭据拦截、查重、嵌入、索引、图谱、热流全覆盖。队列带 rename 快照 + `.processing` 崩溃恢复 + 坏行重试保留 |
+| **外发前脱敏（v0.15）** | `server/guards.mjs` 单一事实源：会话文本在落盘/外呼前按「别记」剔除、疑似凭据替换为占位符；MCP 写入拒绝、队列消费再拦，三道同源防线。`allowRemote: false` 一键本地模式 |
+| **事件时间锚（v0.15）** | 新增 `event_date` 列：recall 返回的 `date` 是事件锚（事件发生/观察日），唤醒/修正/休眠等管理操作不再推移它 |
+| **尾部优先提炼窗口（v0.15）** | 修复「只读前 30 条 → 末尾纠正进不了上下文」：预算内从最新往回收集，头部保留背景，省略段显式标注 |
+| **会话指纹二采（v0.15）** | 同 session 文本指纹变化即重新采集（修复「stop 后继续聊天的新内容不被采集」），库侧由统一入口幂等去重 |
+| **写入** | 自动去重、凭据拦截（写入与外发双重脱敏） |
+| **检索** | FTS5 trigram 词法 + **双语语义**（bge-small-zh/en 双模型，按查询语言路由，RRF 融合）；零命中时提示休眠馆存在（低频事实不静默消失） |
+| **修正/删除** | 乐观并发（expected_version）；修正继承置顶与事件锚；默认逻辑删除 + `hard=true` 物理擦除；休眠条目可直接删 |
+| **遗忘曲线** | 命中续租 TTL（命中 +7 天封顶 90，同时刷新计时起点）、kind 宽限期（待办45天/会话60天/事实·经验120天/偏好240天）、超期转 dormant 降可见度（可唤醒）、置顶豁免——这是**降可见度策略**，不是经过验证的遗忘理论（见已知边界） |
 | **会话摘要卡** | 会话结束自动生成带日期的自包含摘要（跨会话联合与时间推理的原料） |
 | **日期锚定** | 相对时间（昨天/上周/明天）摄入时即换算绝对日期 |
 | **自动提炼** | 会话结束把用户发言蒸馏为 ≤4 条 preference/fact/procedure/todo |
@@ -23,7 +28,7 @@ lm-memory 给它们一块共享的、可检索、可纠正、**会遗忘**的记
 | **变更热流（v0.10）** | 写操作追加 `changes.jsonl`（带内容摘要），capture 插件经 `agent/pre-step` 向**已开会话**实时注入记忆 delta——不再"旧会话碰壁才发现新记忆" |
 | **索引注入层（v0.11）** | `current.md` 改索引形态：置顶条目全文 + 其余每条一行指针（#id 保留可定位），细节靠 `memory_recall`——注入层体积 90KB→约 20KB，对齐 Anthropic《The components of agent memory》"注入层必须小" |
 | **dream 去重扫描（v0.11）** | `dream.mjs` 纯函数 + `scripts/dream-dryrun.mjs` 只读 CLI：嵌入余弦扫疑似重复对（跨 kind），人审后合并——dreaming 的库内第一步（对照 transcript 校对属后续版本） |
-| **冲突消解扫描（v0.14）** | `conflict.mjs` 纯函数 + `scripts/conflict-dryrun.mjs` 只读 CLI + 随 sleep pass 自动巡检（结果经热流播报）：两级信号（取代性引用 / 相似+完结词）扫「旧条疑似已被新事实接棒」候选对——dreaming 的库内第二步。候选对粗筛误报率偏高（决策文体词密度），语义复核属 v0.15 规划 |
+| **冲突消解扫描（v0.14）** | `conflict.mjs` 纯函数 + `scripts/conflict-dryrun.mjs` 只读 CLI + 随 sleep pass 自动巡检（结果经热流播报）：两级信号（取代性引用 / 相似+完结词）扫「旧条疑似已被新事实接棒」候选对——dreaming 的库内第二步。v0.14.1 起信号层跳过版本发布条；v0.14.1-0.14.3 候选对自动交提炼模型做 Level 2 语义复核（superseded/related/unrelated，判定缓存化、复核过的误报不反复播报），判定输出只进审计与热流，不自动改库 |
 | **记忆图谱（v0.12）** | `edges` 边表（similar/co_tag/ref 三类确定性边，高频 tag 防 supernode）+ `recall expand:true` 一跳关联扩展 + viewer 图谱页（零依赖 SVG 力导）。思路对齐 Mem0 native Graph Memory——不做类型化关系，纯共现/相似/引用推断 |
 | **viewer** | 本地管理页：搜索、版本历史、用户画像、**休眠馆**（唤醒/置顶）、命中统计 |
 | **跨平台** | 路径全部动态解析（DSH_HOME/HOME），macOS / Windows / Linux 通用 |
@@ -104,7 +109,7 @@ sleep pass（工具/启动/12h 巡检三处共用）
 - **处置**（人工/agent 复核后）：`memory_correct` 给旧条追加「【已过时 MM-DD】见 #新id」指针，或由新条正式接棒；教训叙事里的完结词不是状态声明，不要直接 `memory_forget`
 - **CLI**：`node scripts/conflict-dryrun.mjs [--sim=0.85]` 只读出报告
 - **已知边界**：候选对粗筛误报率偏高（记忆条目为高密度决策文体）——v0.14.1 起两级缓解：①信号层跳过版本发布条（版本时间线互不推翻，真库 15 对复核 14 误报中过半源于版本条互撞）；②候选对自动交默认提炼模型做 Level 2 语义复核（superseded/related/unrelated 三档），复核确认的才二次播报，无 key 优雅降级为候选对播报。判定输出只进审计与热流，不自动改库
-- **验证**：`conflict-e2e.mjs` 15 断言（只读性/取代信号对/零相似引用对/双完结词不误报/deleted 排除/纯关联引用不出对/阈值独立）
+- **验证**：`conflict-e2e.mjs` 20 断言（只读性/取代信号对/零相似引用对/双完结词不误报/deleted 排除/纯关联引用不出对/阈值独立），已收编进 `scripts/test.mjs` 主套件
 
 ## 架构
 
@@ -112,23 +117,24 @@ sleep pass（工具/启动/12h 巡检三处共用）
 你的 Agent（DSH / Claude Code / 其他 MCP 宿主）
    │
    ├── MCP 工具（独立进程，崩了不影响宿主）：
-   │     memory_remember   写入
-   │     memory_recall     词法+语义融合检索（带命中埋点）
-   │     memory_correct    修正（乐观并发）
-   │     memory_forget     逻辑删除
+   │     memory_remember   写入（统一提交入口）
+   │     memory_recall     词法+语义融合检索（带命中埋点；零命中提示休眠馆）
+   │     memory_correct    修正（乐观并发，继承置顶/事件锚）
+   │     memory_forget     删除（默认逻辑，hard=true 物理擦除；休眠可删）
    │     memory_list       列出
    │     memory_pin        置顶（永不休眠）/ 唤醒
    │     memory_sleep      手动触发一轮休眠整理
    │
    └── [仅 DSH] dsh-lm-capture 插件：
-         会话结束 → episode 索引 + LLM 原子提炼 + 带日期摘要卡
-         （提炼模型默认跟随会话模型；无 key 自动降级）
-              ↓
-         server 端：启动 + 每 12h 巡检（休眠整理 + 向量补嵌）
+         会话结束 → episode 索引卡 + LLM 原子提炼 + 带日期摘要卡
+         （外发前脱敏；提炼模型默认跟随会话模型；无 key 自动降级；allowRemote:false 可关外呼）
+              ↓ 候选队列 pending-*.jsonl（helper 无独立写库权）
+         server 统一提交入口：启动/召回前消费（凭据拦截→查重→事务→嵌入→索引→图谱→热流）
+         + 每 12h 巡检（队列消化 + 休眠整理 + 向量补嵌）
 ```
 
 数据全部落在 `~/.dsh/memory/`（可用 `LM_MEMORY_DIR` 改）：
-`memory.db`（SQLite+FTS5+向量）、`current.md`（自动生成基线）、`log.jsonl`（审计）、`models/`（嵌入模型缓存，首次自动下载）。
+`memory.db`（SQLite+FTS5+向量）、`current.md`（自动生成基线）、`log.jsonl`（审计）、`changes.jsonl`（变更热流）、`pending-*.jsonl`（采集卡/提炼候选队列，统一提交入口消费，带崩溃恢复）、`models/`（嵌入模型缓存，首次自动下载）。
 
 ## 安装
 
@@ -168,27 +174,46 @@ llm:
 
 key 从环境变量或 `~/.dsh/.credentials.yaml` 同名条目读取；解析不到则跳过 LLM 提炼（检索功能不受影响）。已内置 provider 映射：zai-coding-cn / deepseek-official / deepseek-api-key / agnes。
 
-## 安全设计
+## 安全设计（v0.15 三入口同源防线）
 
-- 凭据永不入库：写入时按模式拦截（`sk-…`、`api_key=…`、长随机串）
-- 召回结果只是上下文数据，不是指令（防注入纪律）
+- **凭据防线**：`server/guards.mjs` 单一事实源（MCP 写入 / 采集插件 / 提炼 helper 共用同一套模式常量）
+  - MCP 写入：模式命中（`sk-…`、`api_key=…`、ghp/xox/AKIA 前缀）直接拒绝入库
+  - 自动采集：会话卡首末句与提炼 job 在**落盘之前**按模式脱敏/剔除（修复「原文先写盘、外发后拦截来不及」）
+  - 远程提炼：进入 LLM prompt 前再过滤一道——「别记」类消息整条剔除，疑似凭据消息替换为占位符
+- **诚实边界**：模式覆盖常见凭据格式，不是任意机密检测器；提炼/摘要/冲突复核默认调用你配置的远程 LLM，`allowRemote: false` 可完全关闭外呼（代价=关闭自动提炼）；逻辑删除保留审计行与历史热流摘要，彻底擦除用 `memory_forget` 的 `hard:true`（审计记录不含全文，changes.jsonl 历史摘要可能残留片段）
+- 召回结果只是上下文数据，不是指令（防注入纪律）；变更热流注入同样声明「无关则忽略本条」
 - 修正需要 `expected_version`，并发不互相覆盖
-- 删除/休眠均为可逆状态，审计日志全程保留
+- 全部写入走统一提交入口，log.jsonl（无内容审计）+ changes.jsonl（带摘要热流）双流可追溯
 
-## 质量测评（全部可复现）
+## 质量测评
 
-### 外部基准（2026-11 实测，glm-5.3-flash 作答与判分）
+### 外部基准（2026-11-02 实测 · 2026-11-17 勘误口径）
+
+> **勘误说明**：2026-11-17 外部评审发现当年 harness 的 LoCoMo 类别映射全错（官方为
+> 1=multi-hop / 2=temporal / 3=open-domain / 4=single-hop / 5=adversarial，见
+> [snap-research/locomo#29](https://github.com/snap-research/locomo/issues/29) 与
+> [官方 evaluation.py](https://github.com/snap-research/locomo/blob/main/task_eval/evaluation.py)），
+> 且证据覆盖率统计（filter(Boolean) 数值平均）把部分覆盖记为满分。下表为
+> `scripts/eval/reaggregate-locomo.mjs` 对**同一份逐题结果**按官方映射重算的数字，
+> 取代此前 README 的分项宣称。修正版 runner（官方类别 id 逐题留档 + judge 原始输出留档）见 `scripts/eval/locomo-run.mjs`。
 
 | 基准 | QA 正确率 | 检索层 |
 |---|---|---|
-| LongMemEval-S（22 题分层样本） | 0.55 | 证据会话召回@15 = **1.00** |
-| LongMemEval-Oracle（36 题） | 0.64-0.67 | **1.00** |
-| LoCoMo（3 段对话 55 题） | **0.73** | turn 召回 0.74 |
+| LongMemEval-S（22 题分层样本） | 0.55 | gold session 覆盖@15 = 1.00（oracle 精简证据上下文，说服力有限） |
+| LongMemEval-Oracle（36 题） | 0.64-0.67 | 同上 |
+| LoCoMo（3 段对话 55 题） | 40/55 = **0.727** | 任一证据命中 38/54 = 0.70 · **真平均覆盖率 62.5%** · 证据全齐仅 30/54 = 55.6% |
 
-LoCoMo 分项：multi-hop **0.93**（日期锚定后）、adversarial 0.87、single-hop 0.67。检索层用 56MB 本地双模型即达满分证据会话召回；QA 层差距主要在答题模型（glm-flash）与跨会话合成。
+LoCoMo 分项（官方类别映射重算）：multi-hop 10/15 = **0.67** · temporal 14/15 = 0.93 · open-domain 3/10 = **0.30** · single-hop 13/15 = 0.87 · **adversarial 未进入当年测试循环（0 题）——本项目不存在任何 adversarial 成绩**。
 
-方法论沉淀（`docs/memory-protocol.md` 与提交历史）：
-- 逐题验尸分型（检索缺证据 / 证据在手拼接失败 / 相对时间未锚定）——80% 的"multi-hop 失败"是日期算术而非检索
+**诚实结论（取代旧宣称）**：
+- ~~「multi-hop 0.93」~~ 不成立——那是时间题（temporal）的成绩；「0.20→0.93 多跳跃升」叙事作废
+- ~~「检索已解决，瓶颈在答题模型」~~ 不成立——session 级命中 ≠ 答案证据齐全（真平均证据覆盖 62.5%）
+- 0.73 **无跨系统排名资格**：数据子集、类别分布、judge、答题模型、上下文预算均与他人不同（Mem0 自报 [92.5%](https://mem0.ai/research) 属厂商口径，不可直接相减）
+- bench 与生产链路不同：bench 喂全量对话 turns + 全量摘要时间线；生产采集只收用户发言（尾部优先窗口 8000 字）——bench 分数不代表生产端到端质量
+- 日期锚定等读时工程与摘要/top-k/judge 同期共变，未做单变量消融；同模型自答自判，评判偏差未测
+
+方法论沉淀（`docs/memory-protocol.md` 与提交历史，仍有效）：
+- 逐题验尸分型（检索缺证据 / 证据在手拼接失败 / 相对时间未锚定）
 - 判分协议先验数据分布再选模板（一起判分协议 bug 曾制造 0.07 的假弱项）
 - 弱模型自查"细节是否存在"会系统性过度弃答（试验失败已回滚）
 
@@ -208,7 +233,7 @@ LM_MEMORY_DIR=/tmp/lm-eval node recall-eval.mjs   # 三档召回基准
 - v0.3 纯词法：LongMemEval_S 证据召回 0.87@5（500 题全量）
 - v0.5 中文语义：语义改写 0.50 → 0.88@5（自产 32 查询集）
 - v0.8 英文语义：英文 0.80 → 1.00@5（10 对改写集）
-- v0.9 读时工程：LoCoMo 总分 0.20 → 0.73（摘要时间线 + 日期锚定 + 判分修正）
+- v0.9 读时工程：LoCoMo 总分 0.20 → 0.73（摘要时间线+日期锚定提示+判分口径多项同期改动，未做单变量消融；分项类别名 2026-11-17 已按官方映射勘误）
 - 闭环对照（30 题）：无记忆 0% vs 记忆注入 40%
 
 ## 常见问题
@@ -237,11 +262,16 @@ onlyBuiltDependencies:
 
 能。不配 key 时自动提炼/摘要跳过（不影响检索、遗忘曲线、viewer），手动 `memory_remember` 照常可用。
 
-## 已知边界
+## 已知边界（2026-11-17 外部评审后的诚实清单）
 
-- LongMemEval multi-session（真·跨会话合成）仍弱——瓶颈在答题端而非检索
-- 单用户单机，无同步、无多用户
-- 首次使用需联网下载嵌入模型（~56MB）
+- **遗忘是命中续租 TTL，不是经验证的遗忘理论**：返回即计命中（不区分是否真被使用），命中同时刷新计时起点——错误记忆可被反复曝光长期续命；置顶全文/启动索引等基线使用不计入命中。长期误休眠率/恢复率未测，因此休眠定位为**可唤醒的降可见度策略**（零命中时召回会提示休眠馆存在，缓解发现死角）
+- **评测可信度**：历史成绩含开发集反复调优成分，无独立 holdout；真 adversarial 能力未测；judge 与答题为同一模型；无同条件竞品对照（评测工具链已修：官方类别 id 逐题留档、覆盖率三口径、目录守卫，见 `scripts/eval/`）
+- **证据链**：auto-extract 记忆只有会话级来源标签（`session:X`），未定位到具体消息 span；「候选摘要直接升为事实」暂缺原文回查接口
+- **图谱**：每次写操作全量 O(N²) 相似重建（数百条实测毫秒级，`rebuild_edges` 审计含 ms 可观测；数千条后需增量方案）；图谱对答案质量的收益未做消融
+- **双列嵌入 = 语言路由**，不是跨语言召回证明（英文查询中文记忆的可靠性未测）
+- LongMemEval multi-session（真·跨会话合成）仍弱
+- 单用户单机，无同步、无多用户；首次使用需联网下载嵌入模型（~56MB）
+- viewer 图谱页不支持触摸拖拽/键盘访问（本地管理工具，桌面鼠标优先）
 
 ## 开发
 

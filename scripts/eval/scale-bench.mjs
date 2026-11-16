@@ -59,5 +59,5 @@ console.log(`库体积: ${dbSize.toFixed(1)}MB (+WAL ${wal.toFixed(1)}MB)`);
 console.log(`吞吐: 建库 ${Math.round(N / ((Date.now() - t0) / 1000))} 条/s`);
 fs.writeFileSync(path.join(__dirname, "scale-report.json"), JSON.stringify({ n: N, q: Q, p50: +pct(0.5), p95: +pct(0.95), p99: +pct(0.99), dbMB: +dbSize.toFixed(1) }, null, 2));
 await client.close();
-fs.rmSync(dir, { recursive: true, force: true });
+fs.rmSync(dir, { recursive: true, force: true }); // dir 来自 mkdtemp(tmpdir)，恒安全；守卫见 eval-dir-guard.mjs
 process.exit(0);

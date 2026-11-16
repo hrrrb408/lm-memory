@@ -7,10 +7,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmEvalDir } from "./eval-dir-guard.mjs"; // v0.15：拒绝清空生产目录（外审指出的误操作风险）
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MEM_DIR = process.env.LM_MEMORY_DIR || "/tmp/lm-eval";
-fs.rmSync(MEM_DIR, { recursive: true, force: true });
+rmEvalDir(MEM_DIR);
 fs.mkdirSync(MEM_DIR, { recursive: true });
 const data = JSON.parse(fs.readFileSync(path.join(__dirname, "dataset.json"), "utf8"));
 

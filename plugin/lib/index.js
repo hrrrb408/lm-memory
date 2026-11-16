@@ -5,6 +5,8 @@
 // 纪律：任何异常都不得抛出宿主进程；只写 stderr；幂等（同一 session 只采一次）。
 import fs from "node:fs";
 import { boundedIndex } from "../../server/recall-utils.mjs";
+import { filterTextsForLLM } from "../../server/guards.mjs"; // v0.15 外发前脱敏/剔除（与 server/helper 同源）
+import { createHash } from "node:crypto";
 import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -16,19 +18,34 @@ const libDir = () => path.dirname(fileURLToPath(import.meta.url));
 let MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
 const PENDING = path.join(MEM_DIR, "pending-episodes.jsonl");
 const MARKER = path.join(MEM_DIR, "captured-sessions.jsonl");
-const seen = new Set();
+const captureIndex = new Map(); // sessionId -> 文本指纹 hash（null = 旧版无指纹记录）
+let captureIndexLoaded = false;
 
 const log = (msg) => { try { console.error(`[lm-capture] ${msg}`); } catch {} };
 
-function alreadyCaptured(sessionId) {
-  if (seen.has(sessionId)) return true;
+const textHash = (texts) => createHash("sha256").update(texts.join("\u0000")).digest("hex").slice(0, 16);
+function loadCaptureIndex() {
   try {
-    return fs.existsSync(MARKER) && fs.readFileSync(MARKER, "utf8").includes(sessionId);
-  } catch { return false; }
+    if (fs.existsSync(MARKER)) {
+      for (const line of fs.readFileSync(MARKER, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        try { const r = JSON.parse(line); if (r?.sessionId) captureIndex.set(r.sessionId, r.hash ?? null); } catch {}
+      }
+    }
+  } catch {}
+  captureIndexLoaded = true;
 }
-function markCaptured(sessionId) {
-  seen.add(sessionId);
-  try { fs.appendFileSync(MARKER, JSON.stringify({ ts: new Date().toISOString(), sessionId }) + "\n"); } catch {}
+// v0.15：会话指纹幂等（外审实锤「同 session 二次 stop 的后续纠正不被采集」）。
+// 同指纹 = 已采集；指纹变化（会话有新内容）= 允许重新采集，库侧由统一提交入口幂等去重。
+function alreadyCaptured(sessionId, hash) {
+  if (!captureIndexLoaded) loadCaptureIndex();
+  if (!captureIndex.has(sessionId)) return false;
+  const h = captureIndex.get(sessionId);
+  return h === null || h === hash; // 旧版记录（无指纹）保守视为已采集
+}
+function markCaptured(sessionId, hash) {
+  captureIndex.set(sessionId, hash ?? null);
+  try { fs.appendFileSync(MARKER, JSON.stringify({ ts: new Date().toISOString(), sessionId, hash: hash ?? null }) + "\n"); } catch {}
 }
 
 function extractSessionModel(session) {
@@ -131,7 +148,8 @@ async function ensureFreshViewer(port) {
 
 function dispatchExtraction(session, texts, config) {
   try {
-    if (config?.extract === false || texts.length < 2) return;
+    // v0.15 allowRemote 开关：false 时完全不外呼 LLM（本地模式，只保留会话索引卡），默认 true
+    if (config?.extract === false || config?.allowRemote === false || texts.length < 2) return;
     const jobsDir = path.join(MEM_DIR, "extraction-jobs");
     fs.mkdirSync(jobsDir, { recursive: true });
     const jobFile = path.join(jobsDir, `${session.id}.json`);
@@ -156,9 +174,15 @@ function dispatchExtraction(session, texts, config) {
 
 function capture(session, config) {
   try {
-    if (!session?.id || alreadyCaptured(session.id)) return;
-    const texts = extractUserTexts(session);
-    if (!texts) return;
+    const rawTexts = extractUserTexts(session);
+    if (!rawTexts || !session?.id) return;
+    // v0.15 外发前防线：脱敏/剔除发生在任何落盘（会话卡首末句、提炼 job）之前——
+    // 修复外审实锤「原始文本先写 job/pending，SECRET 检查来不及」。
+    const { texts, dropped, redacted } = filterTextsForLLM(rawTexts, (op, d) => log(`${op} ${JSON.stringify(d)}`));
+    if (dropped || redacted) log(`filtered before persist: ${dropped} dropped, ${redacted} redacted`);
+    if (!texts.length) return;
+    const hash = textHash(texts);
+    if (alreadyCaptured(session.id, hash)) return;
     const min = Number.isFinite(config?.minUserMessages) ? config.minUserMessages : 2;
     if (texts.length < min) return;
     const cwd = session.header?.cwd ?? session.meta?.cwd ?? "";
@@ -170,11 +194,12 @@ function capture(session, config) {
       kind: "episode",
       content: `会话 ${date}｜${cwd || "未知目录"}｜${texts.length} 条用户输入｜首问「${first}」｜末问「${last}」`,
       tags: "auto-capture",
+      eventDate: date,
       capturedAt: new Date().toISOString(),
     };
     fs.mkdirSync(MEM_DIR, { recursive: true });
     fs.appendFileSync(PENDING, JSON.stringify(rec) + "\n");
-    markCaptured(session.id);
+    markCaptured(session.id, hash);
     log(`captured ${session.id} (${texts.length} user msgs)`);
     dispatchExtraction(session, texts, config);
   } catch (e) {
