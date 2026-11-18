@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" role="img" aria-label="lm-memory — local-first long-term memory for agents">
+  <style>
+    .bg { fill: #f7f3ea; }
+    .ink { fill: #232a32; }
+    .sub { fill: #68727c; }
+    .accent { fill: #2f6bd8; }
+    .stroke { stroke: #232a32; }
+    .wire { stroke: #2f6bd8; }
+  </style>
+  <rect class="bg" x="0" y="0" width="880" height="200" rx="16"/>
+  <g fill="none" class="stroke" stroke-width="2">
+    <rect x="62" y="72" width="122" height="26" rx="9"/>
+    <rect x="76" y="44" width="108" height="26" rx="9"/>
+    <rect x="90" y="16" width="94" height="26" rx="9"/>
+  </g>
+  <line class="wire" x1="184" y1="29" x2="216" y2="29" stroke-width="2"/>
+  <circle class="accent" cx="222" cy="29" r="6"/>
+  <text class="ink" x="252" y="96" font-family="-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="58" font-weight="700" letter-spacing="-1.5">lm-memory</text>
+  <text class="sub" x="256" y="132" font-family="-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="21">local-first long-term memory for agents</text>
+  <text class="sub" x="256" y="166" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">SQLite · FTS5 · bge embeddings · MCP · offline</text>
+</svg>
