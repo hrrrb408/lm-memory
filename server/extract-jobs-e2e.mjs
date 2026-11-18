@@ -305,10 +305,16 @@ t("插件不再直接 spawn helper（统一走 server 登记+领取入口）", !
   await new Promise((r) => setTimeout(r, 1200));
   try {
     const evil = await fetch(`http://127.0.0.1:${port}/api/memories`, { headers: { Origin: "http://evil.example.com" } });
-    t("恶意 Origin 被拒（403）", evil.status === 403, `status=${evil.status}`);
-    const crossPort = await fetch(`http://127.0.0.1:${port}/api/memories`, { headers: { Origin: `http://localhost:1` } });
-    t("跨端口本机 Origin 被拒（v0.16.1 同源收紧）", crossPort.status === 403, `status=${crossPort.status}`);
-    const good = await fetch(`http://127.0.0.1:${port}/api/memories`, { headers: { Origin: `http://127.0.0.1:${port}` } }); // Origin 与连接 host 全等（严格同源；localhost 页面场景同理）
+    t("恶意 Origin 只读被拒（403，防探测）", evil.status === 403, `status=${evil.status}`);
+    const evilWrite = await fetch(`http://127.0.0.1:${port}/api/forget`, { method: "POST", headers: { Origin: "http://evil.example.com", "Content-Type": "text/plain" }, body: '{"id":1}' });
+    t("恶意 Origin 写操作被拒（CSRF 防护）", evilWrite.status === 403, `status=${evilWrite.status}`);
+    const crossPortRead = await fetch(`http://127.0.0.1:${port}/api/memories`, { headers: { Origin: `http://localhost:1` } });
+    t("跨端口本机只读放行（v0.17.1：DSH 面板跨端口探测恢复）", crossPortRead.status === 200, `status=${crossPortRead.status}`);
+    const crossPortWrite = await fetch(`http://127.0.0.1:${port}/api/forget`, { method: "POST", headers: { Origin: `http://localhost:1`, "Content-Type": "text/plain" }, body: '{"id":1}' });
+    t("跨端口本机写操作仍被拒（v0.16.1 语义保留）", crossPortWrite.status === 403, `status=${crossPortWrite.status}`);
+    const dshRead = await fetch(`http://127.0.0.1:${port}/api/memories`, { headers: { Origin: `http://127.0.0.1:60139` } }); // DSH 面板真实场景（宿主 GUI 端口）
+    t("DSH 设置面板跨端口探测放行（假故障修复）", dshRead.status === 200, `status=${dshRead.status}`);
+    const good = await fetch(`http://127.0.0.1:${port}/api/memories`, { headers: { Origin: `http://127.0.0.1:${port}` } });
     t("同源 Origin（host:port 全等）放行", good.status === 200, `status=${good.status}`);
     const noOrigin = await fetch(`http://127.0.0.1:${port}/api/version`);
     t("无 Origin（curl/同源）放行", noOrigin.status === 200, `status=${noOrigin.status}`);

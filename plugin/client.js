@@ -26,7 +26,7 @@ window.__ModuleLoader__.load({
 				createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
 					createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, "记忆库"),
 					createElement("span", { style: { fontSize: 12, color: state.ok ? "#2e7d32" : "#c62828" } },
-						state.loaded ? (state.ok ? "运行中 · " + state.total + " 条有效记忆" : "viewer 未运行（DSH 启动时会自动拉起，或手动：node ~/.dsh/memory/server/viewer.mjs）") : "读取中…")),
+						state.loaded ? (state.ok ? "运行中 · " + state.total + " 条有效记忆" : "viewer 未运行——重启 DSH 会自动拉起；也可打开完整管理页触发") : "读取中…")),
 				createElement("div", { style: { fontSize: 13, color: "#666", lineHeight: 1.7 } },
 					"跨会话长期记忆：偏好 / 事实 / 经验 / 待办 / 会话索引，带版本化与审计。新会话自动注入基线，agent 可随时检索。"),
 				createElement("div", null,

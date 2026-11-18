@@ -608,22 +608,26 @@ http.createServer(async (req, res) => {
   const json = (d, code = 200) => { res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(d)); };
   try {
     const u = new URL(req.url, "http://x");
-    // v0.16 访问边界（第七轮外审实锤：无 Origin 校验 + ACAO:* → 恶意网页可跨站 POST 删除记忆）。
-    // v0.16.1（第八轮复核实锤：跨端口本机 Origin 仍可写入）——从 hostname 白名单收紧为【同源】：
-    // Origin 的 host:port 必须与请求的 Host 头全等（管理页自己），任何其他端口一律 403。
-    // 移除 ACAO:*——viewer 页面与 API 同源，合法使用不需要 CORS。
+    // v0.16 访问边界：恶意网页可跨站 POST 删除记忆 → 写操作需要本机同源。
+    // v0.16.1 曾把整个校验收紧为严格同源——第十+一轮复核实锤误伤 DSH 设置面板的跨端口 GET 探测
+    // （设置面板在宿主 GUI 端口，fetch viewer API 被 403，管理页显示「viewer 未运行」假故障）。
+    // v0.17.1 读写分级：
+    //   GET/HEAD（只读）→ 本机 hostname 任意端口放行（DSH 面板跨端口探测恢复；
+    //     无 ACAO 响应头，浏览器默认策略下恶意网页读不到响应体，泄露被 CORS 覆盖）
+    //   写方法（POST/PUT/DELETE/PATCH）→ 严格同源（CSRF 写防护不回退，第八轮 P2-5 语义保留）
     const origin = req.headers.origin;
-    if (origin) {
-      const host = String(req.headers.host || "");
-      const hostName = host.replace(/:\d+$/, "");
-      let oHost = "", oPort = "";
-      try { const uo = new URL(origin); oHost = uo.hostname; oPort = uo.port; } catch {}
-      const sameOrigin = oHost === hostName && oPort === host.replace(/^[^:]+:/, "") &&
-        ["127.0.0.1", "localhost", "[::1]", "::1"].includes(oHost);
-      if (!sameOrigin) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
-    }
     const host = String(req.headers.host || "");
     const hostName = host.replace(/:\d+$/, "");
+    const hostPort = host.includes(":") ? host.slice(host.lastIndexOf(":") + 1) : "";
+    const isWrite = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+    if (origin) {
+      let oHost = "", oPort = "";
+      try { const uo = new URL(origin); oHost = uo.hostname; oPort = uo.port; } catch {}
+      const localHost = ["127.0.0.1", "localhost", "[::1]", "::1"].includes(oHost);
+      const sameOrigin = oHost === hostName && oPort === hostPort;
+      if (isWrite && !sameOrigin) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
+      if (!isWrite && !localHost) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
+    }
     if (!["127.0.0.1", "localhost", "[::1]", ""].includes(hostName)) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden host"); }
     if (req.method === "GET" && u.pathname === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
