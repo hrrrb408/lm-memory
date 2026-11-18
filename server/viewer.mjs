@@ -627,6 +627,13 @@ http.createServer(async (req, res) => {
       const sameOrigin = oHost === hostName && oPort === hostPort;
       if (isWrite && !sameOrigin) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
       if (!isWrite && !localHost) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
+      // v0.17.2（十二轮复核实锤：v0.17.1 只修了服务端放行，浏览器 CORS 还会把响应体拦在 JS 外——
+      // DSH 面板 fetch 能到达但 r.json() 抛错，仍显示「viewer 未运行」）：本机 hostname 的只读请求
+      // 回显 ACAO。本机内互信可读；远程域上一行已 403；写操作不受影响（严格同源）。
+      if (!isWrite && localHost && !sameOrigin) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
+      }
     }
     if (!["127.0.0.1", "localhost", "[::1]", ""].includes(hostName)) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden host"); }
     if (req.method === "GET" && u.pathname === "/") {
