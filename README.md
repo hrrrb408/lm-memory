@@ -1,4 +1,7 @@
-# lm-memory 🧠
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/banner-dark.svg">
+  <img src="docs/banner.svg" alt="lm-memory — local-first long-term memory for agents">
+</picture>
 
 Agent 长期记忆：一个 MCP server、一个可选的 DSH 采集插件、一个本地管理页。单用户，SQLite + FTS5 + 本地双语嵌入（56MB）。存储和嵌入都在本机；提炼和摘要会调用你配置的远程 LLM，`allowRemote: false` 可以全部关掉。
 
