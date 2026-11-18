@@ -620,17 +620,19 @@ http.createServer(async (req, res) => {
     const hostName = host.replace(/:\d+$/, "");
     const hostPort = host.includes(":") ? host.slice(host.lastIndexOf(":") + 1) : "";
     const isWrite = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+    // v0.17.3（诊断实锤）：DSH 桌面 App 以自定义协议 dsh-app://app 加载页面，面板探测的 Origin
+    // 就是它——hostname 解析不出本机地址，被白名单 403（「viewer 未运行」真根因）。
+    // 宿主 App 自身是第一方可信来源：读写都放行，读响应回显 ACAO（自定义协议页面同样需要）。
+    const TRUSTED_APP = origin === "dsh-app://app";
     if (origin) {
       let oHost = "", oPort = "";
       try { const uo = new URL(origin); oHost = uo.hostname; oPort = uo.port; } catch {}
       const localHost = ["127.0.0.1", "localhost", "[::1]", "::1"].includes(oHost);
       const sameOrigin = oHost === hostName && oPort === hostPort;
-      if (isWrite && !sameOrigin) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
-      if (!isWrite && !localHost) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
-      // v0.17.2（十二轮复核实锤：v0.17.1 只修了服务端放行，浏览器 CORS 还会把响应体拦在 JS 外——
-      // DSH 面板 fetch 能到达但 r.json() 抛错，仍显示「viewer 未运行」）：本机 hostname 的只读请求
-      // 回显 ACAO。本机内互信可读；远程域上一行已 403；写操作不受影响（严格同源）。
-      if (!isWrite && localHost && !sameOrigin) {
+      if (isWrite && !sameOrigin && !TRUSTED_APP) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
+      if (!isWrite && !localHost && !TRUSTED_APP) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden origin"); }
+      // v0.17.2：本机 hostname 只读回显 ACAO（本机内互信可读；远程域上一行已 403；写严格同源）。
+      if (!isWrite && (localHost || TRUSTED_APP) && !sameOrigin) {
         res.setHeader("Access-Control-Allow-Origin", origin);
         res.setHeader("Vary", "Origin");
       }
