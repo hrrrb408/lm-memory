@@ -1,0 +1,178 @@
+{
+  "node": "v26.12.0",
+  "created_at": "2026-11-17T08:54:03.195Z",
+  "results": [
+    {
+      "suite": "contracts",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 1686.28575,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/contracts.log",
+      "evidence": [
+        "✔ capture retries failed dispatch and preserves message dates (15.650042ms)"
+      ]
+    },
+    {
+      "suite": "sleep-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 317.32629199999997,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/sleep-e2e.log",
+      "evidence": [
+        "✅ 审计含 sleep_pass/pin/wake",
+        "✅ schema 含 dormant 与新列",
+        "16 passed, 0 failed"
+      ]
+    },
+    {
+      "suite": "dream-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 305.7172919999998,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/dream-e2e.log",
+      "evidence": [
+        "✅ 高阈值下无误报 — total=0",
+        "✅ 跨 kind（fact×episode）照抓 — [[5,1,0.999],[5,2,0.9985],[2,1,0.995]]",
+        "8 passed, 0 failed"
+      ]
+    },
+    {
+      "suite": "graph-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 335.8997919999997,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/graph-e2e.log",
+      "evidence": [
+        "✅ expand 缺省仍返回数组老格式",
+        "✅ forget 后 A-B 边自动消失",
+        "14 passed, 0 failed"
+      ]
+    },
+    {
+      "suite": "current-md-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 393.5648339999998,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/current-md-e2e.log",
+      "evidence": [
+        "✅ 注入层 ≤ 25KB（60+5 条） — 7.6KB",
+        "✅ 注入层为索引形态（行数受限） — 80 行",
+        "12 passed, 0 failed"
+      ]
+    },
+    {
+      "suite": "refresh-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 314.7228329999998,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/refresh-e2e.log",
+      "evidence": [
+        "  ✓ 派发通知写入配置目录",
+        "  ✓ job 文件写入配置目录",
+        "=== 28 passed, 0 failed ==="
+      ]
+    },
+    {
+      "suite": "viewer-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 4452.103834,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/viewer-e2e.log",
+      "evidence": [
+        "  ✓ 端点 pid 与实际端口占用一致",
+        "  ✓ 新版在跑时再次 apply 不重启（pid 不变）",
+        "=== 5 passed, 0 failed ==="
+      ]
+    },
+    {
+      "suite": "e2e-test",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 300.064042,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/e2e-test.log",
+      "evidence": [
+        "[recall已删] 空 ✓"
+      ]
+    },
+    {
+      "suite": "recall-eval",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 372.7857920000006,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/recall-eval.log",
+      "evidence": [
+        "SUMMARY zhHard@5=0.50 zhEasy@5=0.75 en@5=0.80 traps=0/3"
+      ]
+    },
+    {
+      "suite": "conflict-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 315.8230000000003,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/conflict-e2e.log",
+      "evidence": [
+        "✅ parseReview 坏输出返回 null",
+        "✅ 纯关联引用（无取代语境）不出对",
+        "20 passed, 0 failed"
+      ]
+    },
+    {
+      "suite": "lifecycle-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 322.93316700000105,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/lifecycle-e2e.log",
+      "evidence": [
+        "✅ 留守员保持休眠",
+        "✅ 零命中提示休眠馆 — []（无相关记忆。不确定就不编造。）　另有 1 条低频记忆在休眠馆未参与本次检索——涉及较早的事实可用 scope:\"dormant\" 查询。",
+        "21 passed, 0 failed"
+      ]
+    },
+    {
+      "suite": "candidates-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 1232.1287080000002,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/candidates-e2e.log",
+      "evidence": [
+        "✅ 重跑后 s-legacy 摘要版本数仍为 2",
+        "43 passed, 0 failed",
+        "[memory] queue_merge_failed_proc_preserved {\"file\":\"pending-memories.jsonl\",\"error\":\"Error: EACCES: permission denied, open '/var/folders/l3/00y511gj4q55gj2z6zdqzrs0\"}"
+      ]
+    },
+    {
+      "suite": "locomo-smoke",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 397.2574999999997,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/locomo-smoke.log",
+      "evidence": [
+        "✅ 源码身份含 serverPath 与 gitHead 字段",
+        "✅ stderr 无 ReferenceError",
+        "8 passed, 0 failed"
+      ]
+    },
+    {
+      "suite": "extract-jobs-e2e",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 27385.350417,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/extract-jobs-e2e.log",
+      "evidence": [
+        "✅ 非法 Host 被拒（防 DNS rebinding） — status=403",
+        "46 passed, 0 failed",
+        "[memory] extract_job_failed_terminal {\"sessionId\":\"s-exhaust\",\"revision\":\"2026-11-17T04:03:00.000Z\",\"attempts\":6}"
+      ]
+    },
+    {
+      "suite": "fixed-regression",
+      "passed": true,
+      "exit_code": 0,
+      "duration_ms": 419.6082500000048,
+      "log": "/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-suite-4ZezdJ/fixed-regression.log",
+      "evidence": [
+        "    \"annotation\": \"required_groups 中每组至少命中一条全文才算该组证据齐全；多组全部命中才算完整；relevant_ids 是允许相关的穷举标签。\""
+      ]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "pid": 30853,
+  "status": "rejected-no-candidate-passed",
+  "criteria": {
+    "weak_accuracy_gain": 0.03,
+    "multi_hop_gain": 0.03,
+    "evidence_full_rate_no_decrease": true
+  },
+  "holdout_caveat": "All LoCoMo conversations were evaluated previously; this is a frozen regression group, not unseen holdout.",
+  "baseline": {
+    "weak": 0.5578947368421052,
+    "multi": 0.6216216216216216,
+    "evidence": 0.24731182795698925
+  },
+  "candidates": [
+    {
+      "name": "retrieval",
+      "metrics": {
+        "weak": 0.47368421052631576,
+        "multi": 0.5405405405405406,
+        "evidence": 0.23655913978494625
+      },
+      "passed": false
+    },
+    {
+      "name": "query-plan",
+      "metrics": {
+        "weak": 0.49473684210526314,
+        "multi": 0.5540540540540541,
+        "evidence": 0.23655913978494625
+      },
+      "passed": false
+    },
+    {
+      "name": "reader-inference",
+      "metrics": {
+        "weak": 0.6526315789473685,
+        "multi": 0.6486486486486487,
+        "evidence": 0.23655913978494625
+      },
+      "passed": false
+    },
+    {
+      "name": "combined",
+      "metrics": {
+        "weak": 0.6421052631578947,
+        "multi": 0.6756756756756757,
+        "evidence": 0.23655913978494625
+      },
+      "passed": false
+    }
+  ]
+}

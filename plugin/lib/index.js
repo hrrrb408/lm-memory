@@ -1,3 +1,4 @@
+import { appendQueue } from "../../server/file-lock.mjs";
 // dsh-lm-capture v0.1 — cordis 纯函数插件，零依赖。
 // 监听 workspace/session-stop 与 session/disposed，把会话里「真实用户输入」
 // （source.kind === 'user'，排除 runtime-context 等注入）提炼成一条 episode，
@@ -74,7 +75,12 @@ function extractUserTexts(session) {
     if (e?.type !== "user/message") continue;
     if (e?.data?.source?.kind !== "user") continue; // 排除 runtime-context / time-context 等注入
     const text = (e.data.content || []).filter((c) => c?.type === "text").map((c) => c.text).join(" ").trim();
-    if (text.length >= 2) texts.push(text);
+    if (text.length >= 2) {
+      const stamp = e.timestamp ?? e.ts ?? e.data?.timestamp;
+      const d = stamp == null ? null : new Date(stamp);
+      const date = d && !isNaN(d) ? d.toLocaleDateString("sv") : "unknown";
+      texts.push(`[message_date=${date}] ${text}`);
+    }
   }
   return texts;
 }
@@ -159,7 +165,7 @@ async function ensureFreshViewer(port) {
 function dispatchExtraction(session, texts, config) {
   try {
     // v0.15 allowRemote 开关：false 时完全不外呼 LLM（本地模式，只保留会话索引卡），默认 true
-    if (config?.extract === false || config?.allowRemote === false || texts.length < 2) return;
+    if (config?.extract === false || config?.allowRemote === false || texts.length < 2) return true;
     const jobsDir = path.join(MEM_DIR, "extraction-jobs");
     fs.mkdirSync(jobsDir, { recursive: true });
     // v0.16 文件名带 rev（第七轮外审实锤竞态：文件名固定为 sessionId 时，续聊的新 dispatch 覆盖同一路径，
@@ -179,10 +185,12 @@ function dispatchExtraction(session, texts, config) {
     })); // 写 job 文件（rev 入名，见上）
     // v0.16.2 任务协议（第九轮复核实锤：插件直接 spawn 绕过登记/领取，双 worker 出现在首次执行）：
     // 插件只写「待派发通知」，server 消费通知后执行「登记→原子领取→spawn」，与恢复器完全同一入口。
-    fs.appendFileSync(path.join(MEM_DIR, "pending-jobs.jsonl"), JSON.stringify({ sessionId: session.id, rev, jobFile: path.basename(jobFile) }) + "\n");
+    appendQueue(path.join(MEM_DIR, "pending-jobs.jsonl"), { sessionId: session.id, rev, jobFile: path.basename(jobFile) });
     log(`extraction dispatched: ${session.id} (${texts.length} msgs)`);
+    return true;
   } catch (e) {
     log(`extract dispatch error: ${e?.message ?? e}`);
+    return false;
   }
 }
 
@@ -212,10 +220,9 @@ function capture(session, config) {
       capturedAt: new Date().toISOString(),
     };
     fs.mkdirSync(MEM_DIR, { recursive: true });
-    fs.appendFileSync(PENDING, JSON.stringify(rec) + "\n");
-    markCaptured(session.id, hash);
+    appendQueue(PENDING, rec);
+    if (dispatchExtraction(session, texts, config)) markCaptured(session.id, hash);
     log(`captured ${session.id} (${texts.length} user msgs)`);
-    dispatchExtraction(session, texts, config);
   } catch (e) {
     log(`capture error: ${e?.message ?? e}`);
   }

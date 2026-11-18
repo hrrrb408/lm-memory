@@ -27,8 +27,9 @@ export function msUntilDormant(row, nowMs = Date.now()) {
 // onDecay(ids)：状态更新的事务内回调——server 用它在同一事务写 outbox 事件（v0.15.2：
 // 复核实锤 sleep 的事件与状态变更不在同一事务）。返回 { checked, decayed, ids }。
 export function runSleepPass(db, audit = () => {}, onDecay = () => {}) {
+  const usage = db.prepare("PRAGMA table_info(memories)").all().some(c=>c.name === "used_count");
   const rows = db.prepare(
-    "SELECT id, kind, hit_count, pinned, updated_at, last_hit_at FROM memories WHERE status='active'"
+    `SELECT id, kind, ${usage ? "used_count AS hit_count, last_used_at AS last_hit_at" : "hit_count, last_hit_at"}, pinned, updated_at FROM memories WHERE status='active'`
   ).all();
   const ids = [];
   const t = new Date().toISOString();

@@ -26,7 +26,7 @@ const db = () => new DatabaseSync(DB, { readOnly: true });
 const idOf = (s) => Number(String(s).match(/id=(\d+)/)[1]);
 const ageDays = (id, d) => {
   const t = new Date(Date.now() - d * 86400000).toISOString();
-  new DatabaseSync(DB).prepare("UPDATE memories SET updated_at=?, last_hit_at=CASE WHEN last_hit_at IS NOT NULL THEN ? ELSE last_hit_at END WHERE id=?").run(t, t, id);
+  new DatabaseSync(DB).prepare("UPDATE memories SET updated_at=?, last_hit_at=CASE WHEN last_hit_at IS NOT NULL THEN ? ELSE last_hit_at END, last_used_at=CASE WHEN last_used_at IS NOT NULL THEN ? ELSE last_used_at END WHERE id=?").run(t, t, t, id);
 };
 let pass = 0, fail = 0;
 const t = (name, cond, extra = "") => { cond ? pass++ : fail++; console.log((cond ? "✅" : "❌") + " " + name + (extra ? " — " + extra : "")); };
@@ -44,6 +44,8 @@ await call("memory_recall", { query: "记忆服务 端口" });
 const h = db().prepare("SELECT hit_count, last_hit_at FROM memories WHERE id=?").get(F);
 t("recall 命中埋点", h.hit_count >= 1 && !!h.last_hit_at, `hit_count=${h.hit_count}`);
 
+await call("memory_feedback", { id: F, useful: true });
+
 // 3) 年龄设定：pref 200d(<240 存活) / fact 125d(>120 但命中延期7d → 存活) / epi 61d(>60 休眠) / todo 46d(>45 但置顶保护)
 ageDays(P, 200); ageDays(F, 125); ageDays(E, 61); ageDays(T, 46);
 const pinR = await call("memory_pin", { id: T, action: "pin" });
@@ -54,7 +56,7 @@ const sl = await call("memory_sleep", {});
 t("sleep pass 只休眠 episode", new RegExp("休眠 1 条").test(sl) && sl.includes(String(E)), sl);
 const st = (id) => db().prepare("SELECT status, pinned, hit_count FROM memories WHERE id=?").get(id);
 t("episode → dormant", st(E).status === "dormant");
-t("fact 靠命中延期存活", st(F).status === "active", JSON.stringify(st(F)));
+t("fact 靠使用反馈延期存活", st(F).status === "active", JSON.stringify(st(F)));
 t("preference 宽限内存活", st(P).status === "active");
 t("todo 置顶保护存活", st(T).status === "active" && st(T).pinned === 1);
 

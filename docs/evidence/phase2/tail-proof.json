@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "prefix_chars": 900,
+  "result": [
+    {
+      "model": "Xenova/bge-small-en-v1.5",
+      "tail_vectors_differ": true,
+      "passages": 3
+    },
+    {
+      "model": "Xenova/bge-small-zh-v1.5",
+      "tail_vectors_differ": true,
+      "passages": 3
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+✔ current.md enforces limits under a real pinned backlog and pointers still resolve (227.212ms)
+[lm-capture] server shim written: /var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-contract-1B9ly3/bin/lm-memory-server.mjs
+[lm-capture] plugin loaded
+[lm-capture] refresh push to session budget-t…: 20 changes
+✔ refresh injection has a hard UTF-8 budget in an isolated plugin session (189.403959ms)
+✔ ID pointers read full active text with strict argument and lifecycle boundaries (214.450792ms)
+✔ kind applies to lexical, semantic-only, exact ID and graph-related results (169.124708ms)
+✔ long passages with the same 400-character prefix store different bilingual vectors (159.099916ms)
+✔ dormant scope is explicit, filtered and read-only for lifecycle statistics (361.117375ms)
+✔ search budgets preserve whole evidence, while ID lookup returns complete text (192.070167ms)
+✔ one gold hit cannot pass a multi-evidence question; incomplete text cannot pass completeness (0.483083ms)
+✔ embedding identity covers tail, role, model and prefix (0.806875ms)
+✔ RRF missing ranks contribute zero, with symmetric lexical/semantic treatment (0.139458ms)
+✔ index limits multibyte text and line count, including oversized pinned content (0.976208ms)
+[lm-capture] server shim written: /var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-capture-fault-NPemMz/bin/lm-memory-server.mjs
+[lm-capture] plugin loaded
+[lm-capture] event: session/created retry-fault
+[lm-capture] event: workspace/session-stop retry-fault
+[lm-capture] extract dispatch error: EEXIST: file already exists, mkdir '/var/folders/l3/00y511gj4q55gj2z6zdqzrs00000gn/T/lm-capture-fault-NPemMz/extraction-jobs'
+[lm-capture] captured retry-fault (2 user msgs)
+[lm-capture] event: workspace/session-stop retry-fault
+[lm-capture] extraction dispatched: retry-fault (2 msgs)
+[lm-capture] captured retry-fault (2 user msgs)
+✔ capture retries failed dispatch and preserves message dates (15.650042ms)
+✔ automatic replay cannot resurrect forgotten or corrected exact claims (211.383541ms)
+✔ candidate source is persisted and hard deletion removes its source row (201.306542ms)
+✔ online backup contains WAL changes and can be opened independently (193.015459ms)
+✔ queue writers serialize across processes and lock releases on process death (184.324416ms)
+✔ exposure does not renew TTL; explicit useful feedback does (195.080125ms)
+✔ evidence-backed same-session revision supersedes old fact; cross-session update is rejected (192.079667ms)
+✔ reclaimed helper cannot publish candidates with a stale owner (274.532959ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1608.92375

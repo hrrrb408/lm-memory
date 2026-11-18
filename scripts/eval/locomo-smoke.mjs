@@ -25,6 +25,7 @@ fs.writeFileSync(dataFile, JSON.stringify([{
   },
   qa: [
     { category: 4, question: "What is the code word?", answer: "test", evidence: ["d1"] },
+    { category: 4, question: "What is the code word?", answer: "test", evidence: ["d1"] },
     { category: 5, question: "ADV-ABSTAIN: What did Caroline say about quantum computing?", adversarial_answer: "Caroline discussed quantum computing", evidence: [] },
     { category: 5, question: "ADV-INDUCED: What did Bob say about the moon?", adversarial_answer: "Bob said the moon is cheese", evidence: [] },
   ],
@@ -42,7 +43,8 @@ t("runner 最小对话运行成功（不再 ReferenceError）", r.status === 0, 
 let out = null;
 try { out = JSON.parse(fs.readFileSync(outFile, "utf8")); } catch {}
 t("结果文件写出", !!out);
-t("三题全部进入循环（1×cat4 + 2×cat5）", out?.n === 3, `n=${out?.n}`);
+t("四题全部进入循环（重复题干不折叠）", out?.n === 4, `n=${out?.n}`);
+t("重复题具有不同原始序号", new Set(out?.results?.map(r=>r.qaIndex)).size === 4);
 t("cat4 正确", out?.byCat?.["single-hop"]?.accuracy === 1, JSON.stringify(out?.byCat?.["single-hop"]));
 t("cat5 正确弃答记对、诱导作答记错（1/2）", out?.byCat?.adversarial?.accuracy === 0.5, JSON.stringify(out?.byCat?.adversarial));
 t("cat5 记录 distractor 供复盘", Array.isArray(out?.results) && out.results.filter((x) => x.category === 5).every((x) => typeof x.distractor === "string"));

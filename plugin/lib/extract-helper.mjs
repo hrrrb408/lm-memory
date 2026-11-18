@@ -7,6 +7,8 @@
 // 嵌入、索引、图谱、热流全部同路径。
 // job.json: { sessionId, date, cwd, texts: [用户原始发言...], llm?, sessionModel? }
 import fs from "node:fs";
+import { assertLease } from "../../server/job-lease.mjs";
+import { appendQueue } from "../../server/file-lock.mjs";
 import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
@@ -62,9 +64,9 @@ if (!KEY) {
 }
 if (!KEY) { // 无 key：优雅降级——跳过提炼（检索不受影响），不留死任务
   audit("extract_skipped_no_key", { sessionId: job.sessionId, model: MODEL, keyEnv: KEY_ENV });
-  fs.rmSync(jobPath, { force: true });
-  console.error(`[extract] ${job.sessionId}: 无 ${KEY_ENV}（env 或 ~/.dsh/.credentials.yaml），跳过 LLM 提炼`);
-  process.exit(0);
+  // Missing credentials are recoverable; retain the last durable input.
+  console.error(`[extract] ${job.sessionId}: 无 ${KEY_ENV}（env 或 ~/.dsh/.credentials.yaml），跳过 LLM 提炼，任务保留`);
+  process.exit(1);
 }
 // v0.16.3 网络入口防守（第十轮复核实锤：禁外发开关曾被通知入口绕过）：任何 spawn 路径拉起的 helper
 // 都在这里兜底——禁外发时不外呼、保留 job（恢复远程后可重跑），绝不因上游漏检而发请求。
@@ -79,6 +81,7 @@ async function llm(prompt) {
     try {
       const r = await fetch(`${BASE}/chat/completions`, {
         method: "POST",
+        signal: AbortSignal.timeout(45000),
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${KEY}` },
         body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2500, temperature: 0 }),
       });
@@ -118,7 +121,7 @@ function clipTwoEnds(t, head = 400, tail = 800) {
 }
 function pickWindow(arr, budget = 8000) {
   const items = arr.map((t, i) => ({ i, len: String(t).length }));
-  if (!items.length) return "";
+  if (!items.length) return {transcript:"",evidence:[]};
   const kept = [];
   let used = 0;
   for (let j = items.length - 1; j >= 0; j--) {
@@ -134,9 +137,9 @@ function pickWindow(arr, budget = 8000) {
     parts.push(`${k.i + 1}. ${clipTwoEnds(arr[k.i])}`);
     prev = k.i;
   }
-  return parts.join("\n");
+  return {transcript:parts.join("\n"),evidence:kept.map(k=>({message_index:k.i+1,text:clipTwoEnds(arr[k.i])}))};
 }
-const transcript = pickWindow(texts);
+const {transcript,evidence} = pickWindow(texts);
 const prompt = `以下是用户与 AI 助手的一次会话中，用户的原始发言（按顺序编号，中间可能有省略标注）：
 
 ${transcript}
@@ -148,7 +151,9 @@ ${transcript}
 - 拿不准主体归属（是用户本人还是提到的人/朋友）时，宁可不提炼
 - 每条 content 一句原子主张，中文，≤120字，自包含（不知道会话上下文也能懂）
 - todo 必须含时间线索（如"明天""下周"）
-- 任何条目出现相对时间（昨天/上周/上个月等）都换算出绝对日期（今天是 ${job.date}）——相对时间不锚定是时间类问题的最大失分源
+- 任何条目出现相对时间（昨天/上周/上个月等）都换算出绝对日期（以该条 message_date 为锚，unknown 时保留不确定性，不得使用采集日替代）——相对时间不锚定是时间类问题的最大失分源
+- 若明确纠正下列已有主张，输出 supersedes_id（对应旧 id）以及 evidence_quote（逐字引用本次用户纠正原文）。只是相关、历史事件或未明确变化时不要取代。
+已有主张：${JSON.stringify(job.previousMemories || [])}
 - 最多 4 条，没有就输出空数组
 - 输出纯 JSON 数组，如 [{"kind":"preference","content":"..."}]`;
 
@@ -169,7 +174,7 @@ ${transcript}
 用 1-2 句中文总结这次会话：做了什么、决定了什么、关键结果。要求：
 - 自包含（不知道上下文也能懂），≤100 字
 - 保留人名/项目名/数字/日期等实体
-- 相对时间（昨天/上周/明天等）必须换算成绝对日期再写入（以会话日期 ${job.date} 为锚）
+- 相对时间（昨天/上周/明天等）必须换算成绝对日期再写入（以每条 message_date 为锚；unknown 时不要推算日期）
 - 直接输出总结正文，不要任何前缀、引号或解释`;
 let summary = "";
 {
@@ -196,11 +201,14 @@ if (!JOB_REV) {
   try { fs.writeFileSync(jobPath, JSON.stringify({ ...job, rev: JOB_REV })); }
   catch (e) { failJob("extract_rev_writeback_failed", { error: String(e.message || e).slice(0, 80) }); }
 }
+// A timed-out/reclaimed worker may not publish into a newer claim's task.
+const assertOwner = () => assertLease(path.join(MEM_DIR,"memory.db"),job.sessionId,JOB_REV,process.env.LM_JOB_OWNER);
 const candEid = (kind, content) => "h-" + createHash("sha256").update(`${job.sessionId}|${JOB_REV}|${kind}|${content}`).digest("hex").slice(0, 24);
-const appendCandidate = (kind, content, tags) => {
+const appendCandidate = (kind, content, tags, update = {}) => {
   const eid = candEid(kind, content);
   try {
-    fs.appendFileSync(CANDIDATES, JSON.stringify({ eid, sessionId: job.sessionId, date: job.date, kind, content: String(content).slice(0, 2000), tags, capturedAt: JOB_REV, extractedAt: new Date().toISOString(), eventDate: job.date }) + "\n");
+    assertOwner();
+    appendQueue(CANDIDATES, { ...update, eid, sessionId: job.sessionId, date: job.date, kind, content: String(content).slice(0, 2000), tags, evidence, capturedAt: JOB_REV, extractedAt: new Date().toISOString(), eventDate: job.date });
     producedEids.push(eid);
     return true;
   } catch (e) { console.error(`[extract] candidate enqueue failed: ${e.message}`); return false; }
@@ -210,7 +218,7 @@ let candidates = 0, rejected = 0, enqueueFailed = 0;
 for (const it of items) {
   if (!it?.content || !["preference", "fact", "procedure", "todo"].includes(it.kind)) continue;
   if (checkSecret(it.content)) { rejected++; audit("extract_rejected", { sessionId: job.sessionId, reason: "secret-like" }); continue; }
-  if (appendCandidate(it.kind, it.content, `auto,session:${job.sessionId}`)) candidates++;
+  if (appendCandidate(it.kind, it.content, `auto,session:${job.sessionId}`, {supersedesId:it.supersedes_id,evidenceQuote:it.evidence_quote})) candidates++;
   else enqueueFailed++;
 }
 let summaryQueued = false;
@@ -228,6 +236,7 @@ if (enqueueFailed > 0) { // 未安全落盘的候选：保留 job 供重跑，�
 const safeName = (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, "_");
 const receiptsDir = path.join(MEM_DIR, "extraction-jobs", "receipts");
 try {
+  assertOwner();
   fs.mkdirSync(receiptsDir, { recursive: true });
   fs.writeFileSync(path.join(receiptsDir, `${safeName(job.sessionId)}-${safeName(JOB_REV)}.json`),
     JSON.stringify({ sessionId: job.sessionId, revision: JOB_REV, eids: producedEids, at: new Date().toISOString() }));

@@ -1,0 +1,1341 @@
+{
+  "schema_version": 1,
+  "corpus_sha256": "e0c4eac03cd22e9e6082d460504ad7388ea3935c08948f915c9b9b4542f72574",
+  "head": "3c37e29d130d9523957d2df4018d0acf310be490",
+  "source_sha256": {
+    "server/memory-server.mjs": "a81889eb9509ca23ebb168b48d4d0535f059b8169943972fc182a7c2250a3e63",
+    "server/recall-utils.mjs": "63b29f020127db4f899b3f53a9c52211865044d56a18ac1bbb2c68c0038bc452",
+    "scripts/eval/recall-metrics.mjs": "a5975cbcaacb8dbcecfada7fd751c2b08c089b3742c2d9e15ed1ca57e1488a2f"
+  },
+  "working_tree_dirty": true,
+  "node": "v26.12.0",
+  "platform": "darwin",
+  "mode": "real-bilingual-embeddings",
+  "embedding_coverage": 30,
+  "memories": 30,
+  "created_at": "2026-11-17T13:13:54.925Z",
+  "corpus_provenance": {
+    "source": "scripts/eval/dataset.json",
+    "source_sha256": "5915d5a1c9c39e20ddaf9a18ea47c327ca588507814080a4dea096303e438f59",
+    "limitations": "既有真实使用场景整理集，未提供原始用户对话，不能认证为逐字真实问题。新增多证据题是派生组合题。未读取生产库。",
+    "redactions": [
+      "account handle",
+      "institution",
+      "group number",
+      "personal paths",
+      "dates"
+    ],
+    "annotation": "required_groups 中每组至少命中一条全文才算该组证据齐全；多组全部命中才算完整；relevant_ids 是允许相关的穷举标签。"
+  },
+  "answer_accuracy": "NOT_RUN (retrieval-only; no answer model)",
+  "summary": [
+    {
+      "k": 1,
+      "questions": 37,
+      "positives": 31,
+      "negatives": 6,
+      "hit_at_k": 0.7096774193548387,
+      "evidence_complete_rate": 0.5483870967741935,
+      "evidence_group_coverage": 0.5945945945945946,
+      "false_recall_rate": 0.18518518518518517,
+      "abstention_false_positive_rate": 0,
+      "latency_ms": {
+        "p50": 1.916832999999997,
+        "p95": 2.6590000000001055,
+        "max": 3.4817090000000235
+      }
+    },
+    {
+      "k": 5,
+      "questions": 37,
+      "positives": 31,
+      "negatives": 6,
+      "hit_at_k": 0.8387096774193549,
+      "evidence_complete_rate": 0.8064516129032258,
+      "evidence_group_coverage": 0.8378378378378378,
+      "false_recall_rate": 0.5903614457831325,
+      "abstention_false_positive_rate": 0,
+      "latency_ms": {
+        "p50": 1.017500000000041,
+        "p95": 1.763541000000032,
+        "max": 1.7813330000000178
+      }
+    }
+  ],
+  "rows": [
+    {
+      "question_id": "q01",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m01"
+      ],
+      "latency_ms": 2.6114579999999705
+    },
+    {
+      "question_id": "q02",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04"
+      ],
+      "latency_ms": 3.4817090000000235
+    },
+    {
+      "question_id": "q03",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m23"
+      ],
+      "latency_ms": 2.3434579999999414
+    },
+    {
+      "question_id": "q04",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m11"
+      ],
+      "latency_ms": 2.1556659999999965
+    },
+    {
+      "question_id": "q05",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m09"
+      ],
+      "latency_ms": 1.7091669999999795
+    },
+    {
+      "question_id": "q06",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m22"
+      ],
+      "latency_ms": 1.548665999999912
+    },
+    {
+      "question_id": "q07",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m13"
+      ],
+      "latency_ms": 2.068499999999972
+    },
+    {
+      "question_id": "q08",
+      "category": "A-关键词",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m02"
+      ],
+      "latency_ms": 2.07387499999993
+    },
+    {
+      "question_id": "q09",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04"
+      ],
+      "latency_ms": 2.228458000000046
+    },
+    {
+      "question_id": "q10",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m24"
+      ],
+      "latency_ms": 2.221791000000053
+    },
+    {
+      "question_id": "q11",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m08"
+      ],
+      "latency_ms": 2.1345830000000205
+    },
+    {
+      "question_id": "q12",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m15"
+      ],
+      "latency_ms": 1.916832999999997
+    },
+    {
+      "question_id": "q13",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.625165999999922
+    },
+    {
+      "question_id": "q14",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m22"
+      ],
+      "latency_ms": 1.937750000000051
+    },
+    {
+      "question_id": "q15",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 2.165666999999985
+    },
+    {
+      "question_id": "q16",
+      "category": "B-语义改写",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m06"
+      ],
+      "latency_ms": 2.02537499999994
+    },
+    {
+      "question_id": "q17",
+      "category": "C-时间/状态",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m08"
+      ],
+      "latency_ms": 1.8111670000000686
+    },
+    {
+      "question_id": "q18",
+      "category": "C-时间/状态",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.8303339999999935
+    },
+    {
+      "question_id": "q19",
+      "category": "C-时间/状态",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m13"
+      ],
+      "latency_ms": 1.8894169999999804
+    },
+    {
+      "question_id": "q20",
+      "category": "C-时间/状态",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m30"
+      ],
+      "latency_ms": 1.8479169999999385
+    },
+    {
+      "question_id": "q21",
+      "category": "F-干扰区分",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m05"
+      ],
+      "latency_ms": 1.8568750000000591
+    },
+    {
+      "question_id": "q22",
+      "category": "F-干扰区分",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m23"
+      ],
+      "latency_ms": 1.6474170000000186
+    },
+    {
+      "question_id": "q23",
+      "category": "F-干扰区分",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04"
+      ],
+      "latency_ms": 1.7576660000000857
+    },
+    {
+      "question_id": "q24",
+      "category": "F-干扰区分",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m30"
+      ],
+      "latency_ms": 1.8845000000000027
+    },
+    {
+      "question_id": "q25",
+      "category": "F-干扰区分",
+      "k": 1,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.8522080000000187
+    },
+    {
+      "question_id": "q26",
+      "category": "F-干扰区分",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m28"
+      ],
+      "latency_ms": 1.5264580000000478
+    },
+    {
+      "question_id": "q27",
+      "category": "E-空结果",
+      "k": 1,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.9564579999999978
+    },
+    {
+      "question_id": "q28",
+      "category": "E-空结果",
+      "k": 1,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.3570830000001024
+    },
+    {
+      "question_id": "q29",
+      "category": "E-空结果",
+      "k": 1,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.3746660000000475
+    },
+    {
+      "question_id": "q30",
+      "category": "E-空结果",
+      "k": 1,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.496541000000093
+    },
+    {
+      "question_id": "q31",
+      "category": "E-空结果",
+      "k": 1,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.8245409999999538
+    },
+    {
+      "question_id": "q32",
+      "category": "E-空结果",
+      "k": 1,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.6383749999999964
+    },
+    {
+      "question_id": "multi1",
+      "category": "multi-evidence",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": false,
+      "groups_found": 1,
+      "groups_total": 2,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04"
+      ],
+      "latency_ms": 2.2444169999999986
+    },
+    {
+      "question_id": "multi2",
+      "category": "multi-evidence",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": false,
+      "groups_found": 1,
+      "groups_total": 3,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m16"
+      ],
+      "latency_ms": 2.460916999999995
+    },
+    {
+      "question_id": "multi3",
+      "category": "multi-evidence",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": false,
+      "groups_found": 1,
+      "groups_total": 2,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m26"
+      ],
+      "latency_ms": 2.2648329999999532
+    },
+    {
+      "question_id": "multi4",
+      "category": "multi-evidence",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": false,
+      "groups_found": 1,
+      "groups_total": 2,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m29"
+      ],
+      "latency_ms": 2.6590000000001055
+    },
+    {
+      "question_id": "multi5",
+      "category": "multi-evidence",
+      "k": 1,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": false,
+      "groups_found": 1,
+      "groups_total": 2,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m27"
+      ],
+      "latency_ms": 2.240458999999987
+    },
+    {
+      "question_id": "q01",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m01"
+      ],
+      "latency_ms": 1.7170839999999998
+    },
+    {
+      "question_id": "q02",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 2,
+      "returned": 3,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04",
+        "m16",
+        "m24"
+      ],
+      "latency_ms": 1.0252920000000358
+    },
+    {
+      "question_id": "q03",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 3,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m23",
+        "m16",
+        "m05"
+      ],
+      "latency_ms": 0.9863749999999527
+    },
+    {
+      "question_id": "q04",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 2,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m11",
+        "m24"
+      ],
+      "latency_ms": 0.8387079999999969
+    },
+    {
+      "question_id": "q05",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 3,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m09",
+        "m10",
+        "m19"
+      ],
+      "latency_ms": 0.901625000000081
+    },
+    {
+      "question_id": "q06",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m22"
+      ],
+      "latency_ms": 0.7987500000000409
+    },
+    {
+      "question_id": "q07",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 4,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m13",
+        "m10",
+        "m09",
+        "m19",
+        "m27"
+      ],
+      "latency_ms": 1.0931249999999864
+    },
+    {
+      "question_id": "q08",
+      "category": "A-关键词",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m02"
+      ],
+      "latency_ms": 0.5962499999999409
+    },
+    {
+      "question_id": "q09",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04"
+      ],
+      "latency_ms": 0.8539999999999281
+    },
+    {
+      "question_id": "q10",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 4,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m24",
+        "m14",
+        "m16",
+        "m11",
+        "m04"
+      ],
+      "latency_ms": 1.1362500000000182
+    },
+    {
+      "question_id": "q11",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 3,
+      "returned": 4,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m08",
+        "m10",
+        "m11",
+        "m15"
+      ],
+      "latency_ms": 1.5284169999999904
+    },
+    {
+      "question_id": "q12",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 3,
+      "returned": 4,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m15",
+        "m13",
+        "m11",
+        "m02"
+      ],
+      "latency_ms": 1.3002079999999978
+    },
+    {
+      "question_id": "q13",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.8805419999999913
+    },
+    {
+      "question_id": "q14",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 4,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m22",
+        "m11",
+        "m13",
+        "m14",
+        "m10"
+      ],
+      "latency_ms": 1.7064589999999953
+    },
+    {
+      "question_id": "q15",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 1.0530409999998938
+    },
+    {
+      "question_id": "q16",
+      "category": "B-语义改写",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 3,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m26",
+        "m03",
+        "m06"
+      ],
+      "latency_ms": 1.1578329999999823
+    },
+    {
+      "question_id": "q17",
+      "category": "C-时间/状态",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 4,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m08",
+        "m07",
+        "m10",
+        "m28",
+        "m16"
+      ],
+      "latency_ms": 1.7813330000000178
+    },
+    {
+      "question_id": "q18",
+      "category": "C-时间/状态",
+      "k": 5,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.8442090000000917
+    },
+    {
+      "question_id": "q19",
+      "category": "C-时间/状态",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 2,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m13",
+        "m10"
+      ],
+      "latency_ms": 0.8224169999999731
+    },
+    {
+      "question_id": "q20",
+      "category": "C-时间/状态",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 2,
+      "returned": 3,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m30",
+        "m17",
+        "m01"
+      ],
+      "latency_ms": 1.017500000000041
+    },
+    {
+      "question_id": "q21",
+      "category": "F-干扰区分",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m05"
+      ],
+      "latency_ms": 1.024167000000034
+    },
+    {
+      "question_id": "q22",
+      "category": "F-干扰区分",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 2,
+      "returned": 3,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m23",
+        "m05",
+        "m16"
+      ],
+      "latency_ms": 0.9713749999999663
+    },
+    {
+      "question_id": "q23",
+      "category": "F-干扰区分",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 1,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04"
+      ],
+      "latency_ms": 0.9009999999999536
+    },
+    {
+      "question_id": "q24",
+      "category": "F-干扰区分",
+      "k": 5,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 3,
+      "returned": 3,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m30",
+        "m04",
+        "m18"
+      ],
+      "latency_ms": 1.0462079999999787
+    },
+    {
+      "question_id": "q25",
+      "category": "F-干扰区分",
+      "k": 5,
+      "positive": true,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 1,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.8361670000000458
+    },
+    {
+      "question_id": "q26",
+      "category": "F-干扰区分",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 1,
+      "groups_total": 1,
+      "false_hits": 1,
+      "returned": 2,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m28",
+        "m01"
+      ],
+      "latency_ms": 1.0249579999999696
+    },
+    {
+      "question_id": "q27",
+      "category": "E-空结果",
+      "k": 5,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.9096660000000156
+    },
+    {
+      "question_id": "q28",
+      "category": "E-空结果",
+      "k": 5,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.7302499999999554
+    },
+    {
+      "question_id": "q29",
+      "category": "E-空结果",
+      "k": 5,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.6844579999999496
+    },
+    {
+      "question_id": "q30",
+      "category": "E-空结果",
+      "k": 5,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.7631669999999531
+    },
+    {
+      "question_id": "q31",
+      "category": "E-空结果",
+      "k": 5,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.8517089999999143
+    },
+    {
+      "question_id": "q32",
+      "category": "E-空结果",
+      "k": 5,
+      "positive": false,
+      "hit": false,
+      "evidence_complete": false,
+      "groups_found": 0,
+      "groups_total": 0,
+      "false_hits": 0,
+      "returned": 0,
+      "abstention_false_positive": false,
+      "returned_ids": [],
+      "latency_ms": 0.811458000000016
+    },
+    {
+      "question_id": "multi1",
+      "category": "multi-evidence",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 2,
+      "groups_total": 2,
+      "false_hits": 0,
+      "returned": 2,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m04",
+        "m28"
+      ],
+      "latency_ms": 1.119707999999946
+    },
+    {
+      "question_id": "multi2",
+      "category": "multi-evidence",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 3,
+      "groups_total": 3,
+      "false_hits": 2,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m23",
+        "m16",
+        "m05",
+        "m20",
+        "m29"
+      ],
+      "latency_ms": 1.5577920000000631
+    },
+    {
+      "question_id": "multi3",
+      "category": "multi-evidence",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 2,
+      "groups_total": 2,
+      "false_hits": 3,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m26",
+        "m03",
+        "m06",
+        "m25",
+        "m02"
+      ],
+      "latency_ms": 1.5326669999999467
+    },
+    {
+      "question_id": "multi4",
+      "category": "multi-evidence",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": true,
+      "groups_found": 2,
+      "groups_total": 2,
+      "false_hits": 3,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m29",
+        "m08",
+        "m07",
+        "m11",
+        "m15"
+      ],
+      "latency_ms": 1.763541000000032
+    },
+    {
+      "question_id": "multi5",
+      "category": "multi-evidence",
+      "k": 5,
+      "positive": true,
+      "hit": true,
+      "evidence_complete": false,
+      "groups_found": 1,
+      "groups_total": 2,
+      "false_hits": 4,
+      "returned": 5,
+      "abstention_false_positive": false,
+      "returned_ids": [
+        "m27",
+        "m08",
+        "m18",
+        "m07",
+        "m19"
+      ],
+      "latency_ms": 1.5964999999999918
+    }
+  ]
+}
