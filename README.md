@@ -135,15 +135,34 @@ viewer 只接受本机严格同源的请求：Origin 的 host:port 必须和 Hos
 
 Node.js ≥ 22.16（内置 `node:sqlite`，推荐 24+）。
 
-### Claude Code 或任意 stdio MCP 宿主
+### npm
 
 ```bash
+npm install -g dsh-lm-memory
+```
+
+装好后把 server 挂进宿主（以 Claude Code 为例）：
+
+```bash
+claude mcp add lm_memory -s user -- node "$(npm root -g)/dsh-lm-memory/server/memory-server.mjs"
+```
+
+### Claude Code 或任意 stdio MCP 宿主（git 方式）
+
+```bash
+git clone https://github.com/hrrrb408/lm-memory.git
 claude mcp add lm_memory -s user -- node /path/to/lm-memory/server/memory-server.mjs
 ```
 
 ### DSH
 
-profile 的 `package.json` 加依赖 `"dsh-lm-memory": "github:hrrrb408/lm-memory"`，`dsh.profile.bundles` 加 `"dsh-lm-memory"`，`pnpm install` 后重启 DSH。数据目录和安装位置无关，升级不动数据。
+profile 的 `package.json` 加依赖（建议用 tag 固定版本）：
+
+```json
+"dsh-lm-memory": "github:hrrrb408/lm-memory#v0.17.0"
+```
+
+`dsh.profile.bundles` 加 `"dsh-lm-memory"`，`pnpm install` 后重启 DSH。数据目录和安装位置无关，升级不动数据。
 
 旧库（v0.16 表结构、hit_count 续租）启动时自动迁移：CHECK 约束重建，追加 `used_count/last_used_at` 列。旧曝光计数保留为统计，续租从零按使用反馈重新累计。
 
