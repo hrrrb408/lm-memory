@@ -1,76 +1,89 @@
-// viewer 旧版自动升级 E2E（v0.10）：
-// 1) 假旧 viewer（独立进程、无 /api/version）占端口 → 插件 apply → 旧进程被杀、新 viewer 拉起
-// 2) 再次 apply → 新 viewer 不被重启（pid 不变）
-import http from "node:http";
-import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
+// Viewer startup owns only the exact detached process it launched; unverified legacy
+// listeners must survive, and the settings bridge must not point at their data.
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import apply from "../plugin/lib/index.js";
 
-const INSTALL_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lm-viewer-e2e-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const port = 17840 + Math.floor(Math.random() * 1000);
-const portPid = (p) => { try { return Number(createRequire(import.meta.url)("node:child_process").execFileSync("lsof", ["-ti", ":" + p, "-sTCP:LISTEN"], { encoding: "utf8" }).trim().split("\n")[0]) || 0; } catch { return 0; } };
+const version = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const oldProc = spawn(process.execPath, ["-e", `// legacy viewer.mjs stub (no /api/version)
+  const server = require('node:http').createServer((_req, res) => { res.writeHead(404); res.end(); });
+  server.listen(0, '127.0.0.1', () => process.send(server.address().port));`
+], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+const oldExited = once(oldProc, "exit");
+const observedPids = new Set();
+let route;
+const ctx = {
+  on() {},
+  inject(_, register) { register({ connection: { fetch: { register: (r) => { route = r; } } } }); },
+};
 
-// 1) 假旧 viewer：独立进程占端口、所有请求 404（模拟旧版：无 /api/version）
-// 注：命令行必须含 "viewer.mjs" 字样——插件有 ps 防误杀校验（只杀真正的 viewer 进程）
-const oldProc = spawn(process.execPath, ["-e",
-  `// legacy viewer.mjs stub (v0.9, no /api/version)\nrequire("http").createServer((q,s)=>{s.writeHead(404,{"Content-Type":"application/json"});s.end(JSON.stringify({error:"not found"}))}).listen(${port},"127.0.0.1")`
-], { stdio: "ignore" });
-async function waitPort(p, wantVersion, timeoutMs = 12000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < timeoutMs) {
-    try {
-      const r = await fetch("http://127.0.0.1:" + p + "/api/version", { signal: AbortSignal.timeout(800) });
-      if (r.ok) {
-        const d = await r.json();
-        if (!wantVersion || d.version === wantVersion) return d;
-      }
-    } catch {}
-    await sleep(300);
-  }
-  return null;
+async function poll(fn, predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    try { const value = await fn(); if (predicate(value)) return value; } catch {}
+    await sleep(100);
+  } while (Date.now() < deadline);
+  assert.fail("viewer condition not reached before deadline");
 }
-// 等假旧 viewer 就绪（404 也算就绪）
-{
-  const t0 = Date.now();
-  let up = false;
-  while (Date.now() - t0 < 8000) {
-    try { const r = await fetch("http://127.0.0.1:" + port + "/api/version", { signal: AbortSignal.timeout(500) }); if (r.status === 404) { up = true; break; } } catch {}
-    await sleep(200);
+
+try {
+  const [port] = await once(oldProc, "message");
+  const url = `http://127.0.0.1:${port}/api/version`;
+  const readVersion = async () => (await fetch(url, { signal: AbortSignal.timeout(1000) })).json();
+  const bridge = async () => (await route.fetch()).json();
+  const settings = { memoryDir: TMP, viewer: port };
+
+  apply(ctx, settings);
+  await sleep(750);
+  assert.equal((await fetch(url)).status, 404);
+  assert.equal(oldProc.exitCode, null);
+  assert.equal(oldProc.signalCode, null);
+  assert.deepEqual(await bridge(), { port, status: "offline" });
+  console.log("✓ unverified legacy listener stays alive and hidden from settings");
+
+  oldProc.kill("SIGTERM");
+  await oldExited;
+  apply(ctx, settings);
+  const fresh = await poll(readVersion, (data) => data.version === version && typeof data.startupKey === "string");
+  assert.ok(Number.isInteger(fresh.pid) && fresh.pid > 1);
+  observedPids.add(fresh.pid);
+  assert.deepEqual(await bridge(), { port, status: "ready" });
+  apply(ctx, settings);
+  await sleep(750);
+  assert.equal((await readVersion()).pid, fresh.pid);
+  console.log("✓ spawned viewer reports matching version and repeated startup preserves it");
+
+  let inspectable = false;
+  try {
+    const options = { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] };
+    const listeners = execFileSync("lsof", ["-a", "-ti4TCP:" + port, "-sTCP:LISTEN"], options).trim().split("\n");
+    inspectable = listeners.includes(String(fresh.pid)) && Boolean(execFileSync("ps", ["-ww", "-p", String(fresh.pid), "-o", "command="], options).trim());
+  } catch {}
+  const noRemote = { ...settings, allowRemote: false, memoryDir: path.join(TMP, "changed") };
+  delete process.env.LM_REMOTE_DISABLED;
+  apply(ctx, noRemote);
+  // The mismatched process must not be offered to settings, even if it cannot be replaced.
+  const state = await bridge();
+  assert.ok(["offline", "stale"].includes(state.status), JSON.stringify(state));
+  if (inspectable) {
+    const replaced = await poll(readVersion, (data) => data.pid !== fresh.pid && data.startupKey && data.startupKey !== fresh.startupKey);
+    observedPids.delete(fresh.pid);
+    observedPids.add(replaced.pid);
+    assert.deepEqual(await bridge(), { port, status: "ready" });
+    console.log("✓ changed directory/policy replaces only the exact managed viewer");
+  } else {
+    assert.deepEqual(await bridge(), { port, status: "stale" });
+    assert.equal((await readVersion()).pid, fresh.pid);
+    console.log("✓ viewer remains hidden and untouched when lsof/ps cannot confirm ownership");
   }
-  if (!up) { console.error("FAIL: 假旧 viewer 未就绪"); process.exit(1); }
+} finally {
+  if (oldProc.exitCode === null && oldProc.signalCode === null) oldProc.kill("SIGTERM");
+  for (const pid of observedPids) { try { process.kill(pid, "SIGTERM"); } catch {} }
+  fs.rmSync(TMP, { recursive: true, force: true });
 }
-const oldPid = portPid(port);
-console.log(`旧 viewer pid=${oldPid} 占据端口 ${port}`);
-
-// 2) 插件 apply → 应 kill 旧版并拉起新 viewer
-const plugin = (await import("file://" + path.join(INSTALL_DIR, "plugin/lib/index.js"))).default;
-const wantVersion = JSON.parse(fs.readFileSync(path.join(INSTALL_DIR, "package.json"), "utf8")).version;
-let passed = 0, failed = 0;
-const ok = (cond, label, extra = "") => { if (cond) { passed++; console.log(`  ✓ ${label}`); } else { failed++; console.log(`  ✗ ${label} ${extra}`); } };
-
-plugin({ on: () => {} }, { memoryDir: TMP, viewer: port });
-const fresh = await waitPort(port, wantVersion);
-ok(fresh !== null, "新 viewer 拉起且 /api/version 返回正确版本", `want=${wantVersion}`);
-ok(oldPid !== portPid(port) && !oldProc.pid || true, "（信息）新旧 pid");
-await sleep(300);
-const oldGone = oldProc.kill(0) === false || oldProc.exitCode !== null || oldProc.signalCode !== null;
-ok(oldGone, "旧 viewer 进程已被终止", `exitCode=${oldProc.exitCode} signal=${oldProc.signalCode}`);
-ok(fresh?.pid === portPid(port), "端点 pid 与实际端口占用一致");
-
-// 3) 再次 apply → 新 viewer 不被重启
-const pidBefore = portPid(port);
-plugin({ on: () => {} }, { memoryDir: TMP, viewer: port });
-await sleep(2500);
-ok(portPid(port) === pidBefore, "新版在跑时再次 apply 不重启（pid 不变）", `before=${pidBefore} after=${portPid(port)}`);
-
-// 清理
-try { process.kill(portPid(port), "SIGTERM"); } catch {}
-try { oldProc.kill("SIGKILL"); } catch {}
-fs.rmSync(TMP, { recursive: true, force: true });
-console.log(`\n=== ${passed} passed, ${failed} failed ===`);
-process.exit(failed ? 1 : 0);

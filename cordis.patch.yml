@@ -1,12 +1,12 @@
 # dsh-lm-memory —— Living Memory 全家桶挂载声明（npm/GitHub 包形态）
-# 数据目录由 DSH_HOME/HOME 定位；MCP 指向插件写入的稳定 shim（见 plugin/lib/index.js writeServerShim）。
+# 默认数据目录由 DSH_HOME/系统用户目录定位；MCP 等待插件验证 Node 并写好稳定 shim。
 # 平台无关（macOS / Windows / Linux）。注意：bundle 层只应用 insert: 块内的条目。
 - insert:
     - id: dsh-lm-memory
       name: dsh-lm-memory
       config:
         minUserMessages: 2
-        memoryDir: !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory'
+        memoryDir: !!js process.getBuiltinModule('node:path').join(process.env.DSH_HOME ?? process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh'), 'memory')
         viewer: 7640
         # llm: 可选，提炼/摘要用的模型（不配则默认「跟随会话模型」；显式 model 一旦设置即接管）
         # llm:
@@ -16,17 +16,12 @@
         # 已知可映射 provider：zai-coding-cn / deepseek-official / deepseek-api-key / agnes
     - id: mcp-lm-memory
       name: '@deepseek-ai/dsh-mcp-client'
+      inject: [lmMemoryStartup]
       config:
         serverName: lm_memory
         transport: stdio
-        # GUI 启动的宿主 PATH 里没有 homebrew node，裸 `node` 会 spawn 失败导致 MCP 断连。
-        # 动态解析真实 node（注意：表达式里不能出现「冒号+空格」，YAML 会当成嵌套映射）：
-        command: !!js process.env.DSH_NODE || ['/opt/homebrew/bin/node', '/usr/local/bin/node'].find(p => process.getBuiltinModule('node:fs').existsSync(p)) || 'node'
+        command: !!js ctx.lmMemoryStartup.node
         args:
-          # 指向插件在宿主启动时重写的稳定启动器（~/.dsh/memory/bin/）。
-          # 不能直接指向 node_modules 里的服务器：GUI 宿主环境没有 DSH_PROFILE_DIR/DSH_PROFILE，
-          # 动态解析会回退到不存在的 profiles/default → spawn ENOENT → MCP 永久断连。
-          # shim 路径只依赖 HOME（任何宿主都有）；真实服务器路径由插件按自身安装位置写入。
-          - !!js ((process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory/bin/lm-memory-server.mjs')
+          - !!js ctx.lmMemoryStartup.shimPath
         env:
-          LM_MEMORY_DIR: !!js (process.env.DSH_HOME ?? process.env.HOME + '/.dsh') + '/memory'
+          LM_MEMORY_DIR: !!js ctx.lmMemoryStartup.memoryDir

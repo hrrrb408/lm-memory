@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Living Memory MCP server v0.8 — stdio, single file, zero native deps.
+// Living Memory MCP server — stdio; advertised version tracks the package manifest.
 // v0.7: sleep-time 价值衰减（命中统计 + kind 宽限期 + dormant 休眠 + pin/wake）
 // v0.8: 双模型语义层——中文 bge-small-zh（emb），英文 bge-small-en（emb_en），按查询语言路由
 // Store: ~/.dsh/memory/memory.db (SQLite + FTS5 trigram, WAL)
@@ -721,7 +721,7 @@ function ingestAll() { // 先消化自动采集与提炼候选，保证刚结束
 
 // ---------- server ----------
 const server = new McpServer(
-  { name: "lm-memory", version: "0.15.0" },
+  { name: "lm-memory", version: JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version },
   {
     capabilities: { tools: {} },
     instructions:

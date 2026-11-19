@@ -1,6 +1,6 @@
 {
   "name": "dsh-lm-memory",
-  "version": "0.17.3",
+  "version": "0.18.0-rc.1",
   "description": "本地优先的 Agent 长期记忆：MCP server（SQLite+FTS5+双语语义+遗忘曲线+统一提交入口）+ DSH 采集插件（外发前脱敏/事件时间锚/会话指纹二采）",
   "type": "module",
   "license": "MIT",
@@ -25,7 +25,7 @@
   ],
   "engines": {
     "node": ">=22.16",
-    "dsh": ">=0.1.6-0 <0.2.0 || >=0.2.0-0 <0.3.0 || >=0.2.2-0 <0.3.0"
+    "dsh": ">=0.2.2-rc.3 <0.3.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

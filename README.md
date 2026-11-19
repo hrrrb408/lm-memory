@@ -47,7 +47,7 @@ Agent 长期记忆：一个 MCP server、一个可选的 DSH 采集插件、一�
 ```
 你的 Agent（DSH / Claude Code / 其他 MCP 宿主）
    │
-   ├── MCP server（独立进程）：11 个记忆工具 + 统一提交入口 + outbox + 任务账本
+   ├── MCP server（独立进程）：10 个记忆工具 + 统一提交入口 + outbox + 任务账本
    │
    └── [仅 DSH] dsh-lm-capture 插件
          会话结束 → 采集卡 + 提炼 job 文件 + 待派发通知（不直接 spawn）
@@ -95,13 +95,13 @@ Agent 长期记忆：一个 MCP server、一个可选的 DSH 采集插件、一�
 
 写操作事件进 outbox，再投到 `changes.jsonl`，插件在每个模型 step 前按 per-session 字节 offset 增量读取，把变更摘要注进已开会话（一次最多 8 条）。候选队列的消费时机是 server 启动、召回前和周期巡检，不承诺会话运行中的秒级入库。
 
-`allowRemote: false` 要完整生效：重启 DSH 主应用（重建 shim 和 server），然后 `lsof -ti:<viewer端口> | xargs kill` 掉旧 viewer（它是 detached 进程，只重启主应用杀不掉），插件会按新配置重新拉起。
+修改 `allowRemote` 后重启 DSH，使 MCP server 使用新配置。管理页是独立进程，只有能确认它由当前安装启动时才会自动替换；否则设置面板不会连接旧进程。请确认占用端口的是你启动的旧 lm-memory viewer，再手动停止并重启 DSH；若不是，请改用空闲端口。
 
 ## 安全
 
 凭据防线是 `server/guards.mjs` 一个模块管三处入口（模式：`sk-…`、`api_key=…`、ghp/xox/AKIA 前缀）：MCP 写入直接拒绝；采集在落盘之前脱敏；进远程 prompt 之前再过滤一遍，「别记」的消息整条剔除。评测分块摄入也走同样的双重过滤，有「分块拼不回凭据」的测试。
 
-viewer 只接受本机严格同源的请求：Origin 的 host:port 必须和 Host 头完全一致，拒绝跨端口本机来源和 DNS rebinding。没有 CORS 头，管理页和 API 本来就同源。
+Viewer 监听回环地址，并检查请求的 Host。对携带 Origin 的请求，读接口允许本机来源和 `dsh-app://app`，在跨来源读取时回显 CORS；写接口只允许严格同源或 DSH Desktop 自定义协议来源。设置页先通过宿主接口确认当前 Viewer 地址与配置相符，再读取摘要。
 
 边界要说清楚：凭据模式只认常见格式，不是机密检测器；逻辑删除保留审计行和历史热流摘要（删除事件本身不带原文）；`hard: true` 按 id 删行，介质级擦除和备份清理不在此列。
 
@@ -156,13 +156,19 @@ claude mcp add lm_memory -s user -- node /path/to/lm-memory/server/memory-server
 
 ### DSH
 
-profile 的 `package.json` 加依赖（建议用 tag 固定版本）：
+测试候选版 `0.18.0-rc.1` 尚未发布到 npm 或 GitHub。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加候选文件 `dsh-lm-memory-0.18.0-rc.1.tgz` 的绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.0-rc.1.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
+
+以下是已发布稳定版示例。profile 的 `package.json` 加依赖（建议用 tag 固定版本）：
 
 ```json
-"dsh-lm-memory": "github:hrrrb408/lm-memory#v0.17.0"
+"dsh-lm-memory": "github:hrrrb408/lm-memory#v0.17.3"
 ```
 
 `dsh.profile.bundles` 加 `"dsh-lm-memory"`，`pnpm install` 后重启 DSH。数据目录和安装位置无关，升级不动数据。
+
+GUI 找不到可用 Node 时，将 `DSH_NODE` 设为符合上面版本要求的 Node 可执行文件绝对路径，再重启 DSH。新版启动逻辑在找不到可用 Node 时会跳过 MCP/viewer 启动并记录诊断，不会因此阻止宿主启动。
+
+新版设置面板从 DSH 宿主读取 `viewer` 指定的本机端口（默认 `7640`），不会猜端口。若旧版 viewer 仍占用端口且无法确认进程归属，插件不会结束它；请手动停止自己启动的旧 viewer，再重启 DSH。
 
 旧库（v0.16 表结构、hit_count 续租）启动时自动迁移：CHECK 约束重建，追加 `used_count/last_used_at` 列。旧曝光计数保留为统计，续租从零按使用反馈重新累计。
 
@@ -177,7 +183,12 @@ allowRemote: true       # false = 系统级禁外发
 memoryDir: ""           # 自定义数据目录，队列/标记/任务路径跟随
 refresh: true           # false = 关闭变更热流注入
 extract: true           # false = 关闭自动提炼
+# taskRecall:           # 实验；不配置即关闭，需显式列出测试 Session ID
+#   enabled: true
+#   sessionIds: [session-替换为实际ID]
 ```
+
+自动候选提示与 `refresh` 变更热流相互独立。启用方式、隐私与验收边界见[任务召回指针实验](docs/task-recall-experiment.md)。
 
 key 从环境变量或 `~/.dsh/.credentials.yaml` 同名条目读取。没有 key 时自动提炼跳过但任务保留，重试 5 次后归档到 `extraction-jobs/failed/`，检索和手动写入不受影响。内置 provider 映射：zai-coding-cn、deepseek-official、deepseek-api-key、agnes。
 

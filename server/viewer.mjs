@@ -644,7 +644,7 @@ http.createServer(async (req, res) => {
     }
     // v0.10 版本端点：供插件探测旧版 viewer 并自动升级重启（detached 进程 app 重启杀不掉）
     if (req.method === "GET" && u.pathname === "/api/version") {
-      return json({ version: PKG_VERSION, pid: process.pid });
+      return json({ version: PKG_VERSION, pid: process.pid, startupKey: process.env.LM_VIEWER_STARTUP_KEY ?? null });
     }
     if (req.method === "GET" && u.pathname === "/api/memories") {
       const q = u.searchParams.get("q")?.trim();
