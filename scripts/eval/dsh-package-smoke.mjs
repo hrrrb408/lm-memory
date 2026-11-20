@@ -57,7 +57,8 @@ try {
   const pluginDir = path.join(pkgRoot, 'package');
   const manifest = JSON.parse(await readFile(path.join(pluginDir, 'package.json'), 'utf8'));
   for (const required of ['plugin/lib/index.js', 'plugin/lib/project-tools.mjs', 'plugin/lib/project-tool-catalog.json',
-    'plugin/lib/confirmed-outcomes.mjs', 'server/memory-server.mjs', 'cordis.patch.yml', 'docs/project-memory.md']) {
+    'plugin/lib/confirmed-outcomes.mjs', 'server/memory-server.mjs', 'cordis.patch.yml',
+    'docs/project-memory.md', 'scripts/migrate-to-personal.mjs']) {
     assert.ok(await readFile(path.join(pluginDir, required)).then(() => true, () => false), `packaged file missing: ${required}`);
   }
   assert.ok(!(await readdir(pluginDir)).includes('tests'), 'tests must not ship');

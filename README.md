@@ -156,9 +156,9 @@ claude mcp add lm_memory -s user -- node /path/to/lm-memory/server/memory-server
 
 ### DSH
 
-正式版 `0.18.0` 已发布到 npm 和 GitHub Release。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.18.0.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.0.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
+正式版 `0.18.1` 已发布到 npm 和 GitHub Release。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.18.1.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.1.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
 
-0.18.0 的默认行为与 0.17.3 相同：按 Git 仓库隔离的项目记忆、用户确认结论/修复经验、事实有效日期、任务候选提示，全部需要显式开启，默认关闭，说明与限制见 `docs/project-memory.md`。
+0.18.1 的默认行为与 0.17.3 相同：按 Git 仓库隔离的项目记忆、用户确认结论/修复经验、事实有效日期、任务候选提示，全部需要显式开启，默认关闭，说明与限制见 `docs/project-memory.md`。
 
 以下是已发布稳定版示例。profile 的 `package.json` 加依赖（建议用 tag 固定版本）：
 
@@ -207,8 +207,12 @@ allowRemote: true        # 允许项目模式投递提炼作业（默认不外�
 旧库不会自动迁移，个人库从空开始。需要带走历史时手动跑一次（只复制、不删除原库，可重复执行）：
 
 ```bash
-node scripts/migrate-to-personal.mjs            # 默认数据目录
+# 从仓库检出运行
 node scripts/migrate-to-personal.mjs --dry-run  # 只看条数
+node scripts/migrate-to-personal.mjs
+
+# 从 npm 安装的运行（脚本随包发布）
+node node_modules/dsh-lm-memory/scripts/migrate-to-personal.mjs --dry-run
 ```
 
 细节与已验收边界见[项目记忆](docs/project-memory.md)。

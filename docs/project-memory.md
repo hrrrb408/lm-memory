@@ -26,6 +26,6 @@
 
 - `node --test tests/project-*.test.mjs` 验证 Git 身份、持久绑定和三个真实 SQLite/MCP 后端的路由；工具契约快照与真实服务逐项比对。
 - `node scripts/eval/dsh-project-memory-smoke.mjs` 用已安装的 DSH、临时 HOME、两个真实 Git 仓库及 loopback 模型协议桩，验证首次工具发现、A/B 同号读写、个人库跨项目读取和旧全局库未打开。
-- `node scripts/eval/dsh-package-smoke.mjs <包.tgz>` 验证**打包产物**本身：解包后装进 profile 的 `node_modules`，由已安装 DSH 加载，项目工具注册、写入与召回往返成功，且不生成旧库。
+- `node scripts/eval/dsh-package-smoke.mjs <包.tgz>` 验证**打包产物**本身（含迁移脚本随包发布）：解包后装进 profile 的 `node_modules`，由已安装 DSH 加载，项目工具注册、写入与召回往返成功，且不生成旧库。
 - `node --test tests/migrate-personal.test.mjs` 验证迁移只带 active 条目、保留事件日期与置顶、重复执行为幂等、源库不被改动。
 - 真实模型：用 `glm-5.3-flash` 对一段真实发布流程对话做提炼，产出 2 条经验 + 1 条会话摘要，经统一提交入口入库后可按「发布流程 暂存验收」「完整回归」召回，日期与来源均在。
