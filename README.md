@@ -156,9 +156,9 @@ claude mcp add lm_memory -s user -- node /path/to/lm-memory/server/memory-server
 
 ### DSH
 
-测试候选版 `0.18.0-rc.2` 已发布到 GitHub Release 和 npm（`next` 标签；`latest` 仍为 `0.17.3`）。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.18.0-rc.2.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.0-rc.2.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
+正式版 `0.18.0` 已发布到 npm 和 GitHub Release。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.18.0.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.0.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
 
-rc.2 的默认行为与 rc.1 相同。新增的按 Git 仓库隔离的项目记忆、用户确认结论/修复经验、事实有效日期，全部是显式开启的候选功能，默认关闭，说明与限制见 `docs/project-memory.md`。
+0.18.0 的默认行为与 0.17.3 相同：按 Git 仓库隔离的项目记忆、用户确认结论/修复经验、事实有效日期、任务候选提示，全部需要显式开启，默认关闭，说明与限制见 `docs/project-memory.md`。
 
 以下是已发布稳定版示例。profile 的 `package.json` 加依赖（建议用 tag 固定版本）：
 
@@ -192,6 +192,27 @@ extract: true           # false = 关闭自动提炼
 
 自动候选提示与 `refresh` 变更热流相互独立。启用方式、隐私与验收边界见[任务召回指针实验](docs/task-recall-experiment.md)。
 
+### 项目记忆（可选）
+
+按 Git 仓库隔离记忆，默认关闭：
+
+```yaml
+projectMemory: true      # 项目库按真实 Git 根隔离；个人库独立命名空间
+confirmedOutcomes: true  # 允许「确认结论：/确认修复：」把上一轮助手原句存为项目事实/经验
+allowRemote: true        # 允许项目模式投递提炼作业（默认不外发）
+```
+
+开启后工具分成 `mcp__lm_personal__memory_*`（个人通用）和 `mcp__lm_project__memory_*`（当前仓库），编号各自独立；会话首次使用时绑定，之后不可改绑；未绑定会话、子代理、非 Git 目录一律拒绝，不回退旧全局库。项目模式不启动旧 MCP、旧采集和 Viewer。
+
+旧库不会自动迁移，个人库从空开始。需要带走历史时手动跑一次（只复制、不删除原库，可重复执行）：
+
+```bash
+node scripts/migrate-to-personal.mjs            # 默认数据目录
+node scripts/migrate-to-personal.mjs --dry-run  # 只看条数
+```
+
+细节与已验收边界见[项目记忆](docs/project-memory.md)。
+
 key 从环境变量或 `~/.dsh/.credentials.yaml` 同名条目读取。没有 key 时自动提炼跳过但任务保留，重试 5 次后归档到 `extraction-jobs/failed/`，检索和手动写入不受影响。内置 provider 映射：zai-coding-cn、deepseek-official、deepseek-api-key、agnes。
 
 ### 使用反馈约定
@@ -214,6 +235,8 @@ LoCoMo runner 的凭据走 `BENCH_BASE_URL` / `BENCH_API_KEY` / `BENCH_LLM`，�
 - 图谱每次写操作全量重建（数百条毫秒级，数千条要换增量方案），对答案质量的收益没有消融数据，也不参与默认召回。
 - 双语嵌入只是按查询语言路由，不是跨语言召回。bge-small 的窗口约 512 token，超长记忆（500 字以上）尾部语义会丢——两条 850 字、只有尾部城市不同的文本，向量完全一样。长内容拆开存。
 - 单用户单机，无同步。删除的介质级擦除和备份清理不做。viewer 图谱页不支持触摸和键盘。
+- 项目记忆按物理路径识别仓库：移动或重新 clone 会变成新项目，旧库需要手工再用（迁移脚本可以拷进个人库）。项目模式不启动 Viewer，管理走工具。项目只在 macOS 上验证过，Windows 未实测（依赖硬链接做原子绑定、用 lstat 识别软链/junction，失败时一律拒绝而不是降级）。
+- 自动召回是词面匹配：改述、同义、无引号的中文提问基本不会命中，命中率低是有意为之的保守取舍，不是故障。
 
 ## 常见问题
 

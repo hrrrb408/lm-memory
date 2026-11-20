@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 // Call only with the Host-owned identity, not a tool argument. Refuse links
@@ -48,14 +47,11 @@ export async function bindProjectSession(memoryDir, sessionId, identity, { creat
     try { accepted = await matches(); }
     catch (error) {
       if (error.code !== 'ENOENT' || !create) return null;
-      const temp = path.join(registry, `.binding-${randomUUID()}`);
-      await writeFile(temp, expected, { flag: 'wx', mode: 0o600 });
       try {
-        // Atomic first writer wins; existing readers never see a partial file.
-        try { await link(temp, binding); }
-        catch (conflict) { if (conflict.code !== 'EEXIST') throw conflict; }
-        accepted = await matches();
-      } finally { await unlink(temp).catch(() => {}); }
+        // Exclusive create is atomic on every platform; no hard link needed.
+        await writeFile(binding, expected, { flag: 'wx', mode: 0o600 });
+      } catch (conflict) { if (conflict.code !== 'EEXIST') throw conflict; }
+      accepted = await matches();
     }
     return accepted ? await projectDirectory(base, identity) : null;
   } catch { return null; }

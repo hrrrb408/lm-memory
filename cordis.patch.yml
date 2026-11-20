@@ -14,6 +14,15 @@
         #   baseURL: ""
         #   apiKeyEnv: ZAI_CODING_CN_API_KEY
         # 已知可映射 provider：zai-coding-cn / deepseek-official / deepseek-api-key / agnes
+        #
+        # 以下是默认关闭的候选能力，需要时取消对应注释（细节见 docs/project-memory.md）：
+        # projectMemory: true      # 按 Git 仓库隔离的项目记忆；开启后不再启动旧 MCP/旧采集/Viewer
+        # confirmedOutcomes: true  # 配合 projectMemory：允许用「确认结论：/确认修复：」把上一轮助手原句存为项目事实/经验
+        # allowRemote: true        # 配合 projectMemory：允许把复盘作业交给模型提炼（默认不外发）
+        # taskRecall:              # 实验：任务相关候选编号提示，需同时列精确会话 ID
+        #   enabled: true
+        #   sessionIds:
+        #     - session-替换为测试会话的准确ID
     - id: mcp-lm-memory
       name: '@deepseek-ai/dsh-mcp-client'
       inject: [lmMemoryStartup]
