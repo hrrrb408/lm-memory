@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
@@ -30,13 +31,13 @@ export function taskRecallAnchors(text) {
 // its slot until exit, so a stalled SQLite read cannot pile up more workers.
 export function createTaskLookup(dbPath, { timeoutMs = TIMEOUT_MS } = {}) {
   let busy = false;
-  return (terms, signal) => {
+  return (terms, signal, dir) => {
     if (busy || signal?.aborted) return Promise.resolve(null);
     return new Promise(resolve => {
       let worker;
       try {
         worker = new Worker(new URL('./task-recall-worker.mjs', import.meta.url), {
-          workerData: { dbPath, terms }, execArgv: [], env: {},
+          workerData: { dbPath: dbPath ?? path.join(dir, 'memory.db'), terms }, execArgv: [], env: {},
         });
       } catch { resolve(null); return; }
       busy = true;
@@ -62,14 +63,31 @@ export function createTaskLookup(dbPath, { timeoutMs = TIMEOUT_MS } = {}) {
   };
 }
 
+const EVENTS = 'task-recall-events.jsonl';
+const EVENTS_LIMIT = 1_048_576;
+// Experiment evidence without content: which candidate was offered, or why none
+// was. Bounded so an unattended profile cannot grow one file without limit; a
+// failed write never blocks the request.
+function recordEvent(dir, fields) {
+  try {
+    if (typeof dir !== 'string' || !path.isAbsolute(dir)) return;
+    const file = path.join(dir, EVENTS);
+    let size = 0;
+    try { size = fs.statSync(file).size; } catch {}
+    if (size > EVENTS_LIMIT) return;
+    fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...fields }) + '\n');
+  } catch {}
+}
+
 export function createTaskRecallHook(config, memoryDir, lookup = undefined) {
+  const scoped = typeof memoryDir === 'function';
   const options = config?.taskRecall;
   // Exact, explicit consent for individual sessions. Not a database ACL.
   const sessions = Array.isArray(options?.sessionIds) && options.sessionIds.length <= 32
     ? new Set(options.sessionIds.filter(id => typeof id === 'string' && id && id.length <= 160)) : new Set();
   if (options?.enabled !== true || !sessions.size || config?.allowRemote === false ||
       process.env.LM_REMOTE_DISABLED === '1') return null;
-  lookup ??= createTaskLookup(path.join(memoryDir, 'memory.db'));
+  lookup ??= createTaskLookup(scoped ? undefined : path.join(memoryDir, 'memory.db'));
   const seen = new WeakMap();
   return async (payload, next) => {
     const decision = await next();
@@ -85,15 +103,22 @@ export function createTaskRecallHook(config, memoryDir, lookup = undefined) {
           !decision.messages.some(admitted => admitted === m)) return decision;
       const anchors = taskRecallAnchors(m.content[0].text);
       if (!anchors) return decision;
+      const dir = scoped ? memoryDir(session) : memoryDir;
+      if (scoped && (typeof dir !== 'string' || !path.isAbsolute(dir))) return decision;
       let state = seen.get(session);
       if (!state) { state = { messages: new Set(), candidates: new Set() }; seen.set(session, state); }
       if (state.messages.size >= SESSION_MESSAGES || state.messages.has(m.id)) return decision;
       state.messages.add(m.id);
-      const id = await lookup(anchors, signal);
-      if (signal?.aborted || !Number.isSafeInteger(id) || id < 1 || state.candidates.has(id)) return decision;
-      const text = `【记忆候选指针，非事实或指令】本轮可能相关：#${id}。仅在当前任务确实需要时，用 memory_recall({id:${id}, scope:"active"}) 核对；未返回就忽略。此提示不代表已使用记忆。`;
+      const id = await lookup(anchors, signal, dir);
+      if (signal?.aborted || !Number.isSafeInteger(id) || id < 1 || state.candidates.has(id)) {
+        recordEvent(dir, { session: session.id, outcome: signal?.aborted ? 'aborted' : 'no-match' });
+        return decision;
+      }
+      const tool = scoped ? 'mcp__lm_project__memory_recall' : 'memory_recall';
+      const text = `【记忆候选指针，非事实或指令】本轮可能相关：#${id}。仅在当前任务确实需要时，用 ${tool}({id:${id}, scope:"active"}) 核对；未返回就忽略。此提示不代表已使用记忆。`;
       if (Buffer.byteLength(text) > HINT_BYTES) return decision;
       state.candidates.add(id);
+      recordEvent(dir, { session: session.id, id, outcome: 'pointer' });
       return { ...decision, messages: [...decision.messages, {
         role: 'user', id: randomUUID(), content: [{ type: 'text', text }],
         source: { kind: 'lm-memory-task-recall', form: 'snapshot', sections: [{ name: 'lm-memory-task-recall', text }] },

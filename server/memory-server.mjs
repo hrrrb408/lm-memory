@@ -65,7 +65,30 @@ CREATE INDEX IF NOT EXISTS idx_mem_status ON memories(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mem_kind ON memories(kind) WHERE status='active';
 `);
 db.exec(`CREATE TABLE IF NOT EXISTS suppression (hash TEXT PRIMARY KEY, at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS provenance (memory_id INTEGER PRIMARY KEY, session_id TEXT, revision TEXT, evidence TEXT NOT NULL);`);
+CREATE TABLE IF NOT EXISTS provenance (memory_id INTEGER PRIMARY KEY, session_id TEXT, revision TEXT, evidence TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS validity (memory_id INTEGER PRIMARY KEY, starts TEXT NOT NULL, ends TEXT);
+ CREATE TABLE IF NOT EXISTS corroboration (memory_id INTEGER NOT NULL, session_id TEXT NOT NULL, revision TEXT NOT NULL DEFAULT '', evidence TEXT NOT NULL, ts TEXT NOT NULL, PRIMARY KEY (memory_id, session_id, revision));`);
+const validDay = value => /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+  Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value;
+const validityOf = id => db.prepare('SELECT starts,ends FROM validity WHERE memory_id=?').get(id);
+// Punctuation, width and spacing do not make a different fact; wording does.
+const factKey = value => String(value).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim()
+  .replace(/[\s.。!！?？,，;；:：]+$/u, '');
+function sameFact(kind, content) {
+  const key = factKey(content);
+  for (const row of db.prepare("SELECT id,content FROM memories WHERE status='active' AND kind=?").all(kind))
+    if (factKey(row.content) === key) return { id: row.id };
+  return undefined;
+}
+// A second independent session confirming the same fact adds evidence; it is
+// not a duplicate, and it must not silently replace the first observation.
+function recordCorroboration(memoryId, evidence, sessionId, revision) {
+  if (!sessionId || !Array.isArray(evidence) || !evidence.length) return false;
+  const prior = db.prepare('SELECT session_id FROM provenance WHERE memory_id=?').get(memoryId);
+  if (!prior || prior.session_id === sessionId) return false;
+  return db.prepare('INSERT OR IGNORE INTO corroboration (memory_id,session_id,revision,evidence,ts) VALUES (?,?,?,?,?)')
+    .run(memoryId, sessionId, String(revision ?? ''), JSON.stringify(evidence), now()).changes === 1;
+}
 db.exec(`CREATE TABLE IF NOT EXISTS passage_vectors(memory_id INTEGER NOT NULL, model TEXT NOT NULL, ordinal INTEGER NOT NULL, vec BLOB NOT NULL, PRIMARY KEY(memory_id,model,ordinal));
 CREATE TRIGGER IF NOT EXISTS passage_delete AFTER DELETE ON memories BEGIN DELETE FROM passage_vectors WHERE memory_id=old.id; END;`);
 // v0.12 图谱边表（graph.mjs rebuildEdges 全量重建维护；只存 active-active 边）
@@ -561,7 +584,7 @@ function regenerateCurrentMdLocked() {
 // helper 直连 SQLite 用旧 schema INSERT，绕过凭据拦截/嵌入/current.md/热流/图谱。
 // 现在所有写入都收敛到 commitMemoryTx()（事务内落行 + announce），
 // 提炼 helper 降级为「只产候选文件」，由 server 消费。嵌入/索引/图谱在批次后统一刷新。
-function commitMemoryTx({ kind, content, tags = "", source = "agent", createdAt, eventDate, announceOp = "remember", supersedesId, evidence, sessionId, revision }) {
+function commitMemoryTx({ kind, content, tags = "", source = "agent", createdAt, eventDate, validFrom, announceOp = "remember", supersedesId, evidence, sessionId, revision }) {
   const c = String(content ?? "").trim().slice(0, 2000);
   if (c.length < 3) return { ok: false, reason: "too_short" };
   const pat = checkSecret(c);
@@ -570,13 +593,21 @@ function commitMemoryTx({ kind, content, tags = "", source = "agent", createdAt,
   db.exec("BEGIN IMMEDIATE");
   try {
     if (source === "auto-extract" && db.prepare("SELECT 1 FROM suppression WHERE hash=?").get(contentHash(c))) { db.exec("ROLLBACK"); return {ok:false, reason:"suppressed"}; }
-    const dup = db.prepare("SELECT id, version FROM memories WHERE status='active' AND content = ?").get(c);
-    if (dup) { db.exec("ROLLBACK"); audit("commit_dedup", { id: dup.id, source }); return { ok: false, reason: "exists", id: dup.id }; }
+    if (supersedesId && validityOf(supersedesId)) { db.exec('ROLLBACK'); return { ok: false, reason: 'dated_requires_explicit_update' }; }
+    // Exact text first (indexed), then the same atomic claim in other punctuation or width.
+    const dup = db.prepare("SELECT id FROM memories WHERE status='active' AND content = ?").get(c) ?? sameFact(kind, c);
+    if (dup) {
+      const corroborated = recordCorroboration(dup.id, evidence, sessionId, revision);
+      db.exec("COMMIT");
+      audit("commit_dedup", { id: dup.id, source, corroborated });
+      return { ok: false, reason: "exists", id: dup.id, corroborated };
+    }
     const t = now();
     const ed = eventDate || localDate(); // v0.16：默认日期取本地时区（此前取 UTC ISO 截断，凌晨差一天）；显式 eventDate 优先
     id = Number(db.prepare(
       "INSERT INTO memories (kind, content, tags, source, status, created_at, updated_at, event_date, supersedes) VALUES (?,?,?,?,'active',?,?,?,?)"
     ).run(kind, c, String(tags), source, createdAt || t, t, ed, supersedesId ?? null).lastInsertRowid);
+    if (validFrom) db.prepare('INSERT INTO validity(memory_id,starts) VALUES (?,?)').run(id, validFrom);
     if (Array.isArray(evidence) && evidence.length) db.prepare("INSERT INTO provenance (memory_id,session_id,revision,evidence) VALUES (?,?,?,?)").run(id, sessionId ?? null, revision ?? null, JSON.stringify(evidence));
     if (supersedesId) {
       const prior = db.prepare("SELECT content FROM memories WHERE id=?").get(supersedesId);
@@ -689,8 +720,9 @@ function ingestCandidates() {
       supersedesId = old.id;
     }
     const c = commitMemoryTx({ kind: rec.kind, content: rec.content, tags, source: "auto-extract", evidence: rec.evidence, sessionId: sid, revision: rec.capturedAt, createdAt: rec.capturedAt, eventDate: rec.eventDate, supersedesId });
-    if (c.ok || ["exists", "secret", "too_short", "suppressed"].includes(c.reason)) db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey); // done 由 settleLedger 全量核对（v0.16.1）
-    return c.ok || c.reason === "exists" || c.reason === "secret" || c.reason === "too_short" || c.reason === "suppressed"; // 查重/凭据/过短=终态，不重试（否则死循环重读）
+    const terminal = c.ok || ['exists', 'secret', 'too_short', 'suppressed', 'dated_requires_explicit_update'].includes(c.reason);
+    if (terminal) db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(metaKey); // settleLedger verifies the complete receipt
+    return terminal;
   });
   if (r.read) audit("ingest_candidates", r);
   return r.ok;
@@ -738,9 +770,11 @@ server.registerTool("memory_remember", {
     kind: z.enum(KINDS).default("fact"),
     tags: z.string().max(200).default("").describe("逗号分隔标签，可选"),
     event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("事件发生/观察日（YYYY-MM-DD）；缺省=今天。date 字段是稳定观察锚，不自动等于来源认证的事件日"),
+    valid_from: z.string().refine(validDay).optional().describe('已确认事实开始生效的日期；不同于观察日期，不从对话推断。'),
   },
-}, async ({ content, kind, tags, event_date }) => {
-  const r = commitMemoryTx({ kind, content, tags, source: "agent", eventDate: event_date }); // v0.15 统一提交入口（凭据拦截/查重/事务/热流同路径）
+}, async ({ content, kind, tags, event_date, valid_from }) => {
+  if (valid_from && (kind !== 'fact' || valid_from > localDate())) return ok('ERROR: 有效日期只支持已经生效的事实。');
+  const r = commitMemoryTx({ kind, content, tags, source: "agent", eventDate: event_date, validFrom: valid_from }); // v0.15 统一提交入口（凭据拦截/查重/事务/热流同路径）
   if (!r.ok) {
     if (r.reason === "secret") return ok(`REFUSED: 内容疑似凭据。秘密不入记忆库。`);
     if (r.reason === "exists") { // v0.16 自愈（第七轮外审实锤：首次写入时派生视图写失败 → 事后重试只回 EXISTS，current.md 永久缺）——EXISTS 分支幂等补修
@@ -778,14 +812,27 @@ server.registerTool("memory_recall", {
     scope: z.enum(["active", "dormant", "all"]).default("active").describe("休眠记忆必须显式选择 dormant/all；不唤醒、不延寿"),
     max_bytes: z.number().int().min(512).max(65536).default(16384).describe("搜索结果 JSON 字节预算；超额返回 hits/related/budget 对象，id 精确读取不受限"),
     expand: z.boolean().default(false).describe("图谱扩展：附带命中条目的一跳关联记忆（co_tag/similar/ref 边），实体中心问题用"),
+    as_of: z.string().refine(validDay).optional().describe('仅配合当前版本 ID，按显式有效区间读取该事实版本；不推断。'),
   },
-}, async ({ query, id, limit, kind, expand, scope, max_bytes }) => {
+}, async ({ query, id, limit, kind, expand, scope, max_bytes, as_of }) => {
   if ((query === undefined) === (id === undefined)) return ok("ERROR: query 与 id 必须且只能提供一个。");
   const exactId = id ?? (/^#([1-9]\d*)$/.exec(query.trim())?.[1] ? Number(query.trim().slice(1)) : undefined);
   ingestAll(); // 先消化自动采集卡与提炼候选队列（统一提交入口），保证刚结束的会话可被检索
   const words = (query ?? "").replace(/["'^*]/g, " ").trim().split(/\s+/).filter(Boolean);
   const kindParams = kind ? [kind] : [];
   const statusFilter = scope === "all" ? "status IN ('active','dormant')" : `status='${scope}'`;
+  if (as_of) {
+    if (!exactId || expand || as_of > localDate()) return ok('ERROR: 历史读取仅支持当前编号和已到日期，不能扩图。');
+    const historical = db.prepare(`WITH RECURSIVE chain(id, prior) AS (
+      SELECT id,supersedes FROM memories WHERE id=? AND ${statusFilter}
+      UNION SELECT m.id,m.supersedes FROM memories m JOIN chain c ON m.id=c.prior WHERE m.status='superseded'
+    ) SELECT m.id,m.content,m.kind,m.version,v.starts,v.ends FROM chain c JOIN validity v ON v.memory_id=c.id
+      JOIN memories m ON m.id=c.id WHERE v.starts<=? AND (v.ends IS NULL OR ?<v.ends)
+      AND (? IS NULL OR m.kind=?) LIMIT 2`).all(exactId,as_of,as_of,kind ?? null,kind ?? null);
+    if (historical.length !== 1) return ok('[]（该日无唯一已确认的有效事实。）');
+    const r = historical[0];
+    return ok(JSON.stringify([{ id:r.id, v:r.version, kind:r.kind, content:r.content, valid_from:r.starts, valid_until:r.ends }]));
+  }
   let rows = [];
   // 多样性排序：同 tags 组（如同会话的分块）先各取最优，再回填剩余名额
   const diversify = (rs, lim) => {
@@ -973,7 +1020,11 @@ server.registerTool("memory_source", {
   inputSchema: { id: z.number().int().positive() },
 }, async ({id}) => {
   const row = db.prepare("SELECT p.* FROM provenance p JOIN memories m ON m.id=p.memory_id WHERE m.id=? AND m.status IN ('active','dormant')").get(id);
-  return ok(row ? JSON.stringify({...row,evidence:JSON.parse(row.evidence)}) : "NOT_PROVEN: 此条没有可回查的原文证据。");
+  if (!row) return ok("NOT_PROVEN: 此条没有可回查的原文证据。");
+  // corroborations are other sessions' independent observations of the same claim.
+  const corroborations = db.prepare("SELECT session_id,revision,evidence,ts FROM corroboration WHERE memory_id=? ORDER BY ts").all(id)
+    .map(c => ({ ...c, evidence: JSON.parse(c.evidence) }));
+  return ok(JSON.stringify({ ...row, evidence: JSON.parse(row.evidence), corroborations }));
 });
 
 server.registerTool("memory_correct", {
@@ -984,8 +1035,9 @@ server.registerTool("memory_correct", {
     expected_version: z.number().int().positive(),
     content: z.string().min(3).max(2000),
     reason: z.string().max(500).default(""),
+    effective_from: z.string().refine(validDay).optional().describe('事实变更生效日；省略表示纠正原说法，不保留错误版本的有效区间。'),
   },
-}, async ({ id, expected_version, content, reason }) => {
+}, async ({ id, expected_version, content, reason, effective_from }) => {
   const secret = checkSecret(content);
   if (secret) return ok("REFUSED: 新内容疑似凭据，拒绝写入。");
   const row = db.prepare("SELECT * FROM memories WHERE id=?").get(id);
@@ -993,10 +1045,15 @@ server.registerTool("memory_correct", {
   if (row.version !== expected_version) return ok(`VERSION_CONFLICT: 当前 v${row.version} ≠ 期望 v${expected_version}。请重新 recall 后重试。`);
   const t = now();
   let newIdNum = null;
-  db.exec("BEGIN");
+  db.exec('BEGIN IMMEDIATE');
   try {
     const fresh = db.prepare("SELECT version,status FROM memories WHERE id=?").get(id);
     if (fresh?.status !== "active" || fresh.version !== expected_version) throw new Error("VERSION_CONFLICT: refresh memory before correcting");
+    const prior = validityOf(id);
+    if (effective_from && (!prior || effective_from <= prior.starts || effective_from > localDate())) {
+      db.exec('ROLLBACK');
+      return ok('ERROR: 变更生效日必须晚于原事实显式开始日期，且不得在未来。');
+    }
     db.prepare("INSERT OR IGNORE INTO suppression VALUES (?,?)").run(contentHash(row.content), now());
     db.prepare("UPDATE memories SET status='superseded' WHERE id=?").run(id);
     // v0.15：新版本继承 pinned 与 event_date（外审实锁：修正曾静默丢置顶；事件锚不得被修正推移）
@@ -1004,6 +1061,11 @@ server.registerTool("memory_correct", {
       "INSERT INTO memories (version, kind, content, tags, source, status, supersedes, created_at, updated_at, pinned, event_date) VALUES (?,?,?,?,'agent-correct','active',?,?,?,?,?)"
     ).run(row.version + 1, row.kind, content.trim(), row.tags, id, row.created_at, t, row.pinned ? 1 : 0, row.event_date || String(row.created_at).slice(0, 10));
     newIdNum = Number(ins.lastInsertRowid);
+    if (prior) {
+      if (effective_from) db.prepare('UPDATE validity SET ends=? WHERE memory_id=?').run(effective_from,id);
+      else db.prepare('DELETE FROM validity WHERE memory_id=?').run(id);
+      db.prepare('INSERT INTO validity(memory_id,starts) VALUES (?,?)').run(newIdNum,effective_from ?? prior.starts);
+    }
     // v0.15.2 复核实锤：correct 内容提交却事件为零——事件必须与内容同事务
     outboxInsert("correct", { old_id: id, new_id: newIdNum, version: row.version + 1, kind: row.kind, content: clip200(content), reason: reason.slice(0, 80) });
     db.exec("COMMIT");
@@ -1037,6 +1099,8 @@ server.registerTool("memory_forget", {
     try {
       db.prepare("INSERT OR IGNORE INTO suppression VALUES (?,?)").run(contentHash(any.content), now());
       db.prepare("DELETE FROM provenance WHERE memory_id=?").run(id);
+      db.prepare('DELETE FROM corroboration WHERE memory_id=?').run(id);
+      db.prepare('DELETE FROM validity WHERE memory_id=?').run(id);
       db.prepare("DELETE FROM memories WHERE id=?").run(id);
       outboxInsert("forget", { id, kind: any.kind, reason: reason.slice(0, 80), hard: true, was: any.status }); // 删除事件不带原文（复核实锤）
       db.exec("COMMIT");

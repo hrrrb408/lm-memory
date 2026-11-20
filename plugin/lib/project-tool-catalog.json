@@ -1,0 +1,339 @@
+[
+  {
+    "name": "memory_remember",
+    "description": "写入一条持久记忆。kind: preference(偏好)/fact(事实)/procedure(经验)/episode(事件)。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 2000,
+          "description": "记忆内容，一句原子主张，含必要前提"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "preference",
+            "fact",
+            "episode",
+            "procedure",
+            "todo"
+          ],
+          "default": "fact"
+        },
+        "tags": {
+          "type": "string",
+          "maxLength": 200,
+          "default": "",
+          "description": "逗号分隔标签，可选"
+        },
+        "event_date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "事件发生/观察日（YYYY-MM-DD）；缺省=今天。date 字段是稳定观察锚，不自动等于来源认证的事件日"
+        },
+        "valid_from": {
+          "type": "string",
+          "description": "已确认事实开始生效的日期；不同于观察日期，不从对话推断。"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_batch_remember",
+    "description": "最多50条；逐条使用相同写入防线与事务，逐条返回结果；批次不是全有或全无，索引/图谱批末刷新一次。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 2000
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "preference",
+                  "fact",
+                  "episode",
+                  "procedure",
+                  "todo"
+                ],
+                "default": "fact"
+              },
+              "tags": {
+                "type": "string",
+                "maxLength": 200,
+                "default": ""
+              },
+              "event_date": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 50
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_recall",
+    "description": "按 query 检索或按 id（也可 query=#123）精确读取全文。默认只返回 active；scope 可显式搜索 dormant/all（不自动唤醒）。搜索受 max_bytes 预算约束，id 取全文不截断。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "自然语言查询或 #id；与 id 二选一"
+        },
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "精确读取索引指针全文；与 query 二选一"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "preference",
+            "fact",
+            "episode",
+            "procedure",
+            "todo"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "active",
+            "dormant",
+            "all"
+          ],
+          "default": "active",
+          "description": "休眠记忆必须显式选择 dormant/all；不唤醒、不延寿"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 65536,
+          "default": 16384,
+          "description": "搜索结果 JSON 字节预算；超额返回 hits/related/budget 对象，id 精确读取不受限"
+        },
+        "expand": {
+          "type": "boolean",
+          "default": false,
+          "description": "图谱扩展：附带命中条目的一跳关联记忆（co_tag/similar/ref 边），实体中心问题用"
+        },
+        "as_of": {
+          "type": "string",
+          "description": "仅配合当前版本 ID，按显式有效区间读取该事实版本；不推断。"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_feedback",
+    "description": "仅在记忆被实际使用且有帮助时续租；返回/曝光不再续租。错误或无关不续租。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "useful": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "useful"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_source",
+    "description": "读取 active/dormant 记忆的提炼输入窗口（已脱敏，长消息可能有中段省略），用于核验摘要。来源存在不代表主张已被验证。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_correct",
+    "description": "修正一条记忆：生成新版本并取代旧版。必须带当前 expected_version（乐观并发）。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "expected_version": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "content": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 2000
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500,
+          "default": ""
+        },
+        "effective_from": {
+          "type": "string",
+          "description": "事实变更生效日；省略表示纠正原说法，不保留错误版本的有效区间。"
+        }
+      },
+      "required": [
+        "id",
+        "expected_version",
+        "content"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_forget",
+    "description": "删除一条记忆。默认逻辑删除（保留 tombstone 供审计，不再被召回）；hard=true 物理擦除该行（隐私purge）。active 与 dormant 均可删。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500,
+          "default": ""
+        },
+        "hard": {
+          "type": "boolean",
+          "default": false,
+          "description": "物理删除该行（含已休眠/已接棒的行），用于隐私擦除；默认 false 为可逆逻辑删除"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_list",
+    "description": "按种类列出最近的有效记忆。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "preference",
+            "fact",
+            "episode",
+            "procedure",
+            "todo"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 20
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_pin",
+    "description": "管理记忆生命周期：pin 置顶（永不休眠）/ unpin 取消置顶 / wake 唤醒休眠记忆。对休眠记忆置顶会同时唤醒。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "pin",
+            "unpin",
+            "wake"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500,
+          "default": ""
+        }
+      },
+      "required": [
+        "id",
+        "action"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "memory_sleep",
+    "description": "手动执行一轮 sleep-time 整理：长期未被召回且未置顶的记忆转入休眠（可唤醒、可审计）；顺带跑一轮冲突消解扫描（v0.14，只读），疑似过时对经热流播报。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  }
+]

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createTaskLookup, createTaskRecallHook, taskRecallAnchors } from '../plugin/lib/task-recall.mjs';
@@ -57,6 +57,42 @@ test('only an admitted genuine message in the configured session can yield a bou
   const newer = user('b', query), d2 = decision(newer);
   assert.equal(await hook(prompt(newer), () => d2), d2);
   assert.equal(calls, 2);
+});
+
+test('project recall uses only the bound directory and points to the project tool', async () => {
+  const a = { id: 'scope-a' }, b = { id: 'scope-b' }, unbound = { id: 'scope-none' };
+  const routes = new Map([[a,path.resolve('a')],[b,path.resolve('b')]]);
+  const checked = [];
+  const hook = createTaskRecallHook({taskRecall:{enabled:true,sessionIds:[a.id,b.id,unbound.id]}},
+    session => routes.get(session), async (_terms,_signal,dir) => { checked.push(dir); return 47; });
+  const msg = user('one', query), d = decision(msg);
+  assert.equal(await hook(prompt(msg,unbound), () => d), d);
+  for (const session of [a,b]) {
+    const out = await hook(prompt(msg,session), () => d);
+    assert.match(out.messages[1].content[0].text, /mcp__lm_project__memory_recall/);
+    assert.doesNotMatch(out.messages[1].content[0].text, /mcp__lm_personal/);
+  }
+  assert.deepEqual(checked,[routes.get(a),routes.get(b)]);
+});
+
+test('records a bounded experiment trace without user text, only under an absolute store', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'lm-task-trace-'));
+  try {
+    const msg = user('a', query), d = decision(msg);
+    const sessioned = { id: 'trace' };
+    const hook = createTaskRecallHook({ taskRecall: { enabled: true, sessionIds: ['trace'] } }, dir, async () => 7);
+    await hook(prompt(msg, sessioned), () => d);
+    const missing = await createTaskRecallHook({ taskRecall: { enabled: true, sessionIds: ['trace'] } }, dir, async () => null);
+    const second = user('b', query);
+    await missing(prompt(second, sessioned), () => decision(second));
+    const rows = readFileSync(path.join(dir, 'task-recall-events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(rows.map(r => r.outcome), ['pointer', 'no-match']);
+    assert.equal(rows[0].id, 7);
+    assert.equal(rows[0].session, 'trace');
+    assert.ok(!readFileSync(path.join(dir, 'task-recall-events.jsonl'), 'utf8').includes(query));
+    await createTaskRecallHook({ taskRecall: { enabled: true, sessionIds: ['trace'] } }, '.', async () => 7)(prompt(msg, sessioned), () => d);
+    assert.equal(readFileSync(path.join(dir, 'task-recall-events.jsonl'), 'utf8').trim().split('\n').length, 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('rejects bad/late lookup output and fails open without rewriting host decisions', async () => {

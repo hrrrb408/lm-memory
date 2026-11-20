@@ -6,6 +6,9 @@
 import fs from "node:fs";
 import { boundedIndex } from "../../server/recall-utils.mjs";
 import { createTaskRecallHook } from "./task-recall.mjs";
+import { createProjectRouter, registerScopedTools } from './project-tools.mjs';
+import { createProjectBackends } from './project-backends.mjs';
+import { confirmedOutcomes, isOutcomeConfirmation } from './confirmed-outcomes.mjs';
 import { filterTextsForLLM } from "../../server/guards.mjs"; // v0.15 外发前脱敏/剔除（与 server/helper 同源）
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -17,44 +20,32 @@ import { fileURLToPath } from "node:url";
 const libDir = () => path.dirname(fileURLToPath(import.meta.url));
 
 let MEM_DIR = process.env.LM_MEMORY_DIR || path.join(os.homedir(), ".lm-memory");
-// v0.16.3（第十轮复核实锤：config.memoryDir 只改 MEM_DIR，PENDING/MARKER 在模块加载时固定）——
-// 队列/标记路径在最终配置确定后统一解析，配置目录切换时同步重置去重索引。
-let PENDING = path.join(MEM_DIR, "pending-episodes.jsonl");
-let MARKER = path.join(MEM_DIR, "captured-sessions.jsonl");
-const captureIndex = new Map(); // sessionId -> 文本指纹 hash（null = 旧版无指纹记录）
-let captureIndexLoaded = false;
-function resolvePaths() {
-  PENDING = path.join(MEM_DIR, "pending-episodes.jsonl");
-  MARKER = path.join(MEM_DIR, "captured-sessions.jsonl");
-  captureIndex.clear();
-  captureIndexLoaded = false; // 目录切换后从新的 captured-sessions.jsonl 重建索引
+let legacyCapture;
+function captureStore(dir) {
+  return { dir, pending: path.join(dir, 'pending-episodes.jsonl'), marker: path.join(dir, 'captured-sessions.jsonl'), index: new Map(), confirmed: new Set(), loaded: false };
 }
 
 const log = (msg) => { try { console.error(`[lm-capture] ${msg}`); } catch {} };
 
 const textHash = (texts) => createHash("sha256").update(texts.join("\u0000")).digest("hex").slice(0, 16);
-function loadCaptureIndex() {
+function loadCaptureIndex(store) {
   try {
-    if (fs.existsSync(MARKER)) {
-      for (const line of fs.readFileSync(MARKER, "utf8").split("\n")) {
-        if (!line.trim()) continue;
-        try { const r = JSON.parse(line); if (r?.sessionId) captureIndex.set(r.sessionId, r.hash ?? null); } catch {}
-      }
+    for (const line of fs.readFileSync(store.marker, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try { const r = JSON.parse(line); if (r?.sessionId) store.index.set(r.sessionId, r.hash ?? null); } catch {}
     }
   } catch {}
-  captureIndexLoaded = true;
+  store.loaded = true;
 }
 // v0.15：会话指纹幂等（外审实锤「同 session 二次 stop 的后续纠正不被采集」）。
 // 同指纹 = 已采集；指纹变化（会话有新内容）= 允许重新采集，库侧由统一提交入口幂等去重。
-function alreadyCaptured(sessionId, hash) {
-  if (!captureIndexLoaded) loadCaptureIndex();
-  if (!captureIndex.has(sessionId)) return false;
-  const h = captureIndex.get(sessionId);
-  return h === null || h === hash; // 旧版记录（无指纹）保守视为已采集
+function alreadyCaptured(store, sessionId, hash) {
+  if (!store.loaded) loadCaptureIndex(store);
+  return store.index.get(sessionId) === null || store.index.get(sessionId) === hash;
 }
-function markCaptured(sessionId, hash) {
-  captureIndex.set(sessionId, hash ?? null);
-  try { fs.appendFileSync(MARKER, JSON.stringify({ ts: new Date().toISOString(), sessionId, hash: hash ?? null }) + "\n"); } catch {}
+function markCaptured(store, sessionId, hash) {
+  store.index.set(sessionId, hash);
+  try { fs.appendFileSync(store.marker, JSON.stringify({ ts: new Date().toISOString(), sessionId, hash }) + '\n'); } catch {}
 }
 
 function extractSessionModel(session) {
@@ -67,7 +58,7 @@ function extractSessionModel(session) {
     return last && last.provider && last.model ? { provider: last.provider, model: last.model } : null;
   } catch { return null; }
 }
-function extractUserTexts(session) {
+function extractUserTexts(session, localConfirmations = false) {
   let events;
   try { events = session.ownEvents(); } catch (e) { log(`ownEvents failed: ${e.message}`); return null; }
   const texts = [];
@@ -75,8 +66,8 @@ function extractUserTexts(session) {
     if (e?.type !== "user/message") continue;
     if (e?.data?.source?.kind !== "user") continue; // 排除 runtime-context / time-context 等注入
     const text = (e.data.content || []).filter((c) => c?.type === "text").map((c) => c.text).join(" ").trim();
-    if (text.length >= 2) {
-      const stamp = e.timestamp ?? e.ts ?? e.data?.timestamp;
+    if (text.length >= 2 && !(localConfirmations && isOutcomeConfirmation(text))) {
+      const stamp = e.time ?? e.timestamp ?? e.ts ?? e.data?.timestamp;
       const d = stamp == null ? null : new Date(stamp);
       const date = d && !isNaN(d) ? d.toLocaleDateString("sv") : "unknown";
       texts.push(`[message_date=${date}] ${text}`);
@@ -224,11 +215,11 @@ function initializeStartup(ctx, config) {
   }).catch((error) => log(`viewer ensure error: ${error?.message ?? error}`));
 }
 
-function dispatchExtraction(session, texts, config) {
+function dispatchExtraction(session, texts, config, dir) {
   try {
     // v0.15 allowRemote 开关：false 时完全不外呼 LLM（本地模式，只保留会话索引卡），默认 true
     if (config?.extract === false || config?.allowRemote === false || texts.length < 2) return true;
-    const jobsDir = path.join(MEM_DIR, "extraction-jobs");
+    const jobsDir = path.join(dir, 'extraction-jobs');
     fs.mkdirSync(jobsDir, { recursive: true });
     // v0.16 文件名带 rev（第七轮外审实锤竞态：文件名固定为 sessionId 时，续聊的新 dispatch 覆盖同一路径，
     // 旧 worker（仍在跑几十秒 LLM）完成时 rmSync 删掉的是【新任务】）——rev 入名 = 每次派发独立文件，互不覆盖。
@@ -247,7 +238,7 @@ function dispatchExtraction(session, texts, config) {
     })); // 写 job 文件（rev 入名，见上）
     // v0.16.2 任务协议（第九轮复核实锤：插件直接 spawn 绕过登记/领取，双 worker 出现在首次执行）：
     // 插件只写「待派发通知」，server 消费通知后执行「登记→原子领取→spawn」，与恢复器完全同一入口。
-    appendQueue(path.join(MEM_DIR, "pending-jobs.jsonl"), { sessionId: session.id, rev, jobFile: path.basename(jobFile) });
+    appendQueue(path.join(dir, 'pending-jobs.jsonl'), { sessionId: session.id, rev, jobFile: path.basename(jobFile) });
     log(`extraction dispatched: ${session.id} (${texts.length} msgs)`);
     return true;
   } catch (e) {
@@ -256,9 +247,19 @@ function dispatchExtraction(session, texts, config) {
   }
 }
 
-function capture(session, config) {
+function capture(session, config, store = legacyCapture) {
+  if (!store) return;
   try {
-    const rawTexts = extractUserTexts(session);
+    if (config?.projectMemory === true && config.confirmedOutcomes === true) {
+      for (const outcome of confirmedOutcomes(session)) {
+        // Stable event identity is deduped by the existing transactional consumer.
+        if (store.confirmed.has(outcome.eid)) continue;
+        appendQueue(path.join(store.dir, 'pending-memories.jsonl'), outcome);
+        if (store.confirmed.size >= 2048) store.confirmed.clear();
+        store.confirmed.add(outcome.eid);
+      }
+    }
+    const rawTexts = extractUserTexts(session, config?.projectMemory === true && config.confirmedOutcomes === true);
     if (!rawTexts || !session?.id) return;
     // v0.15 外发前防线：脱敏/剔除发生在任何落盘（会话卡首末句、提炼 job）之前——
     // 修复外审实锤「原始文本先写 job/pending，SECRET 检查来不及」。
@@ -266,7 +267,7 @@ function capture(session, config) {
     if (dropped || redacted) log(`filtered before persist: ${dropped} dropped, ${redacted} redacted`);
     if (!texts.length) return;
     const hash = textHash(texts);
-    if (alreadyCaptured(session.id, hash)) return;
+    if (alreadyCaptured(store, session.id, hash)) return;
     const min = Number.isFinite(config?.minUserMessages) ? config.minUserMessages : 2;
     if (texts.length < min) return;
     const cwd = session.header?.cwd ?? session.meta?.cwd ?? "";
@@ -281,9 +282,9 @@ function capture(session, config) {
       eventDate: date,
       capturedAt: new Date().toISOString(),
     };
-    fs.mkdirSync(MEM_DIR, { recursive: true });
-    appendQueue(PENDING, rec);
-    if (dispatchExtraction(session, texts, config)) markCaptured(session.id, hash);
+    fs.mkdirSync(store.dir, { recursive: true });
+    appendQueue(store.pending, rec);
+    if (dispatchExtraction(session, texts, config, store.dir)) markCaptured(store, session.id, hash);
     log(`captured ${session.id} (${texts.length} user msgs)`);
   } catch (e) {
     log(`capture error: ${e?.message ?? e}`);
@@ -297,15 +298,13 @@ function capture(session, config) {
 // 注入一条 user 消息（source.kind=lm-memory-refresh，同 time-context 形状），
 // 模型在下一步立刻看到——持续记忆流 + 场景触发（前瞻记忆）的最小实现。
 // 纪律：异常静默不抛宿主；per-session 字节 offset 幂等；无变更零成本（一次 stat）。
-const changesPath = () => path.join(MEM_DIR, "changes.jsonl");
-const refreshOffsets = new Map(); // sessionId -> 已消费字节 offset（首次 pre-step 建基线=当时文件尾）
-const seenEventIds = new Map(); // sessionId -> Set<eid>（v0.15.2：至少一次投递下跨 offset 重发的同一事件只应用一次）
+const refreshOffsets = new Map(); // legacy sessionId -> consumed offset
+const seenEventIds = new Map();
 const INJECT_OPS = new Set(["remember", "correct", "forget", "pin", "unpin", "wake"]);
 const OP_LABEL = { remember: "新增", correct: "修正", forget: "删除", pin: "置顶", unpin: "取消置顶", wake: "唤醒" };
 const KIND_LABEL = { preference: "偏好", fact: "事实", procedure: "经验", todo: "待办", episode: "会话" };
 
-function readNewChanges(offset) {
-  const file = changesPath();
+function readNewChanges(file, offset) {
   let st;
   try { st = fs.statSync(file); } catch { return { changes: [], newOffset: offset }; }
   let from = offset;
@@ -345,7 +344,7 @@ function buildDeltaText(changes) {
   return boundedIndex(out, 8192, 40);
 }
 
-function refreshHook(config) {
+function refreshHook(config, directory = () => MEM_DIR, offsets = refreshOffsets, seenIds = seenEventIds) {
   return async (payload, next) => {
     const decision = await next();
     try {
@@ -353,16 +352,19 @@ function refreshHook(config) {
       if (config?.refresh === false) return decision;
       const sid = payload?.agent?.session?.id ?? payload?.agent?.id;
       if (!sid) return decision;
+      const dir = directory(payload);
+      if (!dir) return decision;
+      const file = path.join(dir, 'changes.jsonl');
       let st;
-      try { st = fs.statSync(changesPath()); } catch { return decision; } // 无热流文件=尚无变更
-      let offset = refreshOffsets.get(sid);
-      if (offset === undefined) { refreshOffsets.set(sid, st.size); return decision; } // 本会话基线：此前的不算"新"
-      const { changes, newOffset } = readNewChanges(offset);
-      refreshOffsets.set(sid, newOffset); // 无论是否注入都推进，防重复注入死循环
+      try { st = fs.statSync(file); } catch { return decision; } // 无热流文件=尚无变更
+      let offset = offsets.get(sid);
+      if (offset === undefined) { offsets.set(sid, st.size); return decision; }
+      const { changes, newOffset } = readNewChanges(file, offset);
+      offsets.set(sid, newOffset);
       // v0.15.3：稳定事件身份去重——单次遍历内「检查即登记」，同批重复 eid 与跨 offset 重发都只应用一次
       // （复核实锤：先过滤整批再统一登记，批内两条相同 eid 会漏网注入两次）
-      let seen = seenEventIds.get(sid);
-      if (!seen) { seen = new Set(); seenEventIds.set(sid, seen); }
+      let seen = seenIds.get(sid);
+      if (!seen) { seen = new Set(); seenIds.set(sid, seen); }
       const fresh = [];
       for (const c of changes) {
         if (!c.eid || !seen.has(c.eid)) { fresh.push(c); if (c.eid) seen.add(c.eid); }
@@ -383,9 +385,81 @@ function refreshHook(config) {
   };
 }
 
+function registerProjectLifecycle(ctx, router, config, signal) {
+  const active = new WeakMap();
+  const sessions = new Map();
+  const stores = new Map();
+  const offsets = new Map(), seenIds = new Map();
+  const refresh = refreshHook(config, payload => active.get(payload?.agent?.session)?.dir, offsets, seenIds);
+  const automatic = createTaskRecallHook(config, session => !signal.aborted && active.get(session)?.dir);
+  const finish = session => {
+    const state = active.get(session);
+    if (!signal.aborted && state && config.capture !== false) capture(session, config, state.store);
+  };
+  ctx.on('agent/pre-step', async (payload, next) => {
+    const session = payload?.agent?.session;
+    if (!signal.aborted && !payload?.signal?.aborted && session && !active.has(session)) {
+      const dir = await router.bind(session);
+      if (dir && !signal.aborted && !payload?.signal?.aborted) {
+        let store = stores.get(dir);
+        if (!store) { store = captureStore(dir); stores.set(dir, store); }
+        active.set(session, { dir, store });
+        sessions.set(session.id, session);
+      }
+    }
+    return refresh(payload, automatic ? () => automatic(payload, next) : next);
+  });
+  ctx.on('workspace/session-stop', ({ sessionId } = {}) => { const session = sessions.get(sessionId); if (session) finish(session); });
+  ctx.on('session/disposed', session => {
+    finish(session);
+    if (sessions.get(session?.id) === session) sessions.delete(session.id);
+    offsets.delete(session?.id); seenIds.delete(session?.id);
+    active.delete(session);
+  });
+}
+
+function startProjectTools(ctx, config, signal) {
+  signal.throwIfAborted();
+  const base = path.resolve(config.memoryDir || process.env.LM_MEMORY_DIR || path.join(os.homedir(), '.lm-memory'));
+  const command = resolveNode({ log });
+  if (!command) return;
+  fs.mkdirSync(base, { recursive: true, mode: 0o700 });
+  const router = createProjectRouter(base);
+  const allowRemote = config.allowRemote === true && process.env.LM_REMOTE_DISABLED !== '1';
+  const keyEnv = config.llm?.apiKeyEnv;
+  const forwarded = ['HOME', 'USERPROFILE', 'PATH', 'SystemRoot'];
+  if (allowRemote && typeof keyEnv === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(keyEnv)) forwarded.push(keyEnv);
+  const env = Object.fromEntries(forwarded.filter(key => typeof process.env[key] === 'string').map(key => [key, process.env[key]]));
+  const backends = createProjectBackends({ command, server: path.join(libDir(), '../../server/memory-server.mjs'),
+    env: { ...env, LM_EMBED: '0', ...(allowRemote ? {} : { LM_REMOTE_DISABLED: '1' }) } });
+  const close = () => { void backends.close(); };
+  signal.addEventListener('abort', close, { once: true });
+  try {
+    const unregister = registerScopedTools(ctx, router, backends, signal);
+    if (signal.aborted) { unregister(); return; }
+    signal.addEventListener('abort', unregister, { once: true });
+    registerProjectLifecycle(ctx, router, { ...config, allowRemote }, signal);
+    log('scoped memory tools loaded');
+  } catch (error) {
+    close();
+    throw error;
+  }
+}
+
 export default function apply(ctx, config) {
   try {
-    if (config?.memoryDir) { MEM_DIR = String(config.memoryDir); resolvePaths(); }
+    if (config?.projectMemory === true) {
+      // No legacy startup service, capture, global deltas or Viewer in scoped mode.
+      ctx.inject(['tools'], scoped => scoped.effect(() => {
+        const lifetime = new AbortController();
+        try { startProjectTools(scoped, config, lifetime.signal); }
+        catch (error) { log(`scoped memory startup failed: ${error?.message ?? error}`); }
+        return () => lifetime.abort();
+      }));
+      return;
+    }
+    if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
+    if (!legacyCapture || legacyCapture.dir !== MEM_DIR) legacyCapture = captureStore(MEM_DIR);
     try { initializeStartup(ctx, config); }
     catch (error) { log(`startup error: ${error?.message ?? error}`); }
     // 悬浮按钮已移除：设置 → 记忆库 是正式入口（用户反馈悬浮球多余）
