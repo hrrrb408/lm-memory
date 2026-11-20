@@ -9,6 +9,7 @@ import { createTaskRecallHook } from "./task-recall.mjs";
 import { createProjectRouter, registerScopedTools } from './project-tools.mjs';
 import { createProjectBackends } from './project-backends.mjs';
 import { confirmedOutcomes, isOutcomeConfirmation } from './confirmed-outcomes.mjs';
+import { mergeConfig, readSettings, saveSettings, settingsPath } from './settings.mjs';
 import { filterTextsForLLM } from "../../server/guards.mjs"; // v0.15 外发前脱敏/剔除（与 server/helper 同源）
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -172,6 +173,53 @@ async function ensureFreshViewer(port, node, viewerPath, want) {
   }
   log(`viewer startup blocked on ${port}: existing listener is unverified, newer, or could not be stopped`);
   return false;
+}
+
+// Owner-only bridge for the Settings page: read the switches, save them, and
+// say whether a restart is needed. Nothing here reads memories or the viewer.
+function registerSettingsApi(ctx, applied) {
+  const snapshot = JSON.stringify(applied.settings);
+  const state = () => {
+    const current = readSettings(MEM_DIR);
+    return {
+      settings: current.settings,
+      error: current.error,
+      applied: {
+        projectMemory: applied.settings.projectMemory,
+        confirmedOutcomes: applied.settings.confirmedOutcomes,
+        allowRemote: applied.settings.allowRemote,
+        taskRecall: applied.settings.taskRecall,
+      },
+      restartRequired: JSON.stringify(current.settings) !== snapshot,
+      file: settingsPath(MEM_DIR),
+    };
+  };
+  try {
+    ctx.inject?.(["connection"], (host) => {
+      const dispose = host.connection.fetch?.register({
+        path: "/api/lm-memory-settings",
+        methods: ["GET", "POST"],
+        requestBody: "buffered",
+        fetch: async (request) => {
+          if (request.method === "GET") return Response.json(state(), { headers: { "Cache-Control": "no-store" } });
+          let body;
+          try { body = await request.json(); } catch { return Response.json({ error: "请求体不是合法 JSON" }, { status: 400 }); }
+          if (body && typeof body === "object" && typeof body.reset === "boolean") {
+            const current = readSettings(MEM_DIR).settings;
+            const blank = { ...current };
+            for (const key of ["projectMemory", "confirmedOutcomes", "allowRemote"]) blank[key] = false;
+            blank.taskRecall = { enabled: false, sessionIds: [] };
+            const reset = saveSettings(MEM_DIR, blank);
+            return reset.ok ? Response.json(state()) : Response.json({ error: reset.error }, { status: 400 });
+          }
+          const result = saveSettings(MEM_DIR, body);
+          if (!result.ok) return Response.json({ error: result.error, fields: result.fields }, { status: 400 });
+          return Response.json(state());
+        },
+      });
+      if (dispose && host.effect) host.effect(() => dispose);
+    });
+  } catch (error) { log(`settings bridge unavailable: ${error?.message ?? error}`); }
 }
 
 function initializeStartup(ctx, config) {
@@ -448,6 +496,13 @@ function startProjectTools(ctx, config, signal) {
 
 export default function apply(ctx, config) {
   try {
+    if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
+    // The settings page writes settings.json; it only overrides the switches it
+    // owns, and takes effect on the next start.
+    const state = readSettings(MEM_DIR);
+    if (!legacyCapture || legacyCapture.dir !== MEM_DIR) legacyCapture = captureStore(MEM_DIR);
+    config = mergeConfig(config ?? {}, state);
+    registerSettingsApi(ctx, state);
     if (config?.projectMemory === true) {
       // No legacy startup service, capture, global deltas or Viewer in scoped mode.
       ctx.inject(['tools'], scoped => scoped.effect(() => {
@@ -458,8 +513,6 @@ export default function apply(ctx, config) {
       }));
       return;
     }
-    if (config?.memoryDir) MEM_DIR = String(config.memoryDir);
-    if (!legacyCapture || legacyCapture.dir !== MEM_DIR) legacyCapture = captureStore(MEM_DIR);
     try { initializeStartup(ctx, config); }
     catch (error) { log(`startup error: ${error?.message ?? error}`); }
     // 悬浮按钮已移除：设置 → 记忆库 是正式入口（用户反馈悬浮球多余）

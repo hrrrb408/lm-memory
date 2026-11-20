@@ -116,15 +116,17 @@ test("settings fetch and open use a validated non-default port from the DSH brid
   const calls = [];
   const { effect, section, state } = renderClient(async (url) => {
     calls.push(url);
+    if (url === "./api/lm-memory-settings") return Response.json({ settings: { projectMemory: false, confirmedOutcomes: false, allowRemote: false, taskRecall: { enabled: false, sessionIds: [] } }, restartRequired: false });
     return Response.json(url.startsWith("./") ? { port: 17602, status: "ready" } : { total: 1, items: [{ id: 42, content: "test" }] });
   }, { hostname: "app", protocol: "dsh-app:" });
   const dispose = effect();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls, ["./api/lm-memory-viewer", "http://127.0.0.1:17602/api/memories"]);
+  assert.deepEqual(calls, ["./api/lm-memory-settings", "./api/lm-memory-viewer", "http://127.0.0.1:17602/api/memories"]);
   assert.equal(state().status, "ok");
   const button = section().children[2].children[0];
   assert.equal(button.props.href, "http://127.0.0.1:17602");
   assert.equal(button.props.rel, "noopener noreferrer");
+  assert.match(JSON.stringify(section()), /功能开关/);
   dispose();
 });
 
@@ -132,16 +134,18 @@ test("settings do not guess a default or contact local services without a verifi
   const calls = [];
   const { effect, state } = renderClient(async (url) => {
     calls.push(url);
+    if (url === "./api/lm-memory-settings") return Response.json({ settings: { taskRecall: { enabled: false, sessionIds: [] } } });
     return Response.json({ port: "7640@other-host", status: "ready" });
   }, { hostname: "localhost", protocol: "http:" });
   effect();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls, ["./api/lm-memory-viewer"]);
+  assert.deepEqual(calls, ["./api/lm-memory-settings", "./api/lm-memory-viewer"]);
   assert.equal(state().status, "unavailable");
   const remote = renderClient(() => assert.fail("remote GUI must not fetch browser-local services"), { hostname: "host.example", protocol: "https:" });
   remote.effect();
   assert.equal(remote.state().status, "remote");
   const stale = renderClient(async (url) => {
+    if (url === "./api/lm-memory-settings") return Response.json({ settings: { taskRecall: { enabled: false, sessionIds: [] } } });
     assert.equal(url, "./api/lm-memory-viewer"); // no direct access to the stale viewer
     return Response.json({ port: 17602, status: "stale" });
   }, { hostname: "localhost", protocol: "http:" });

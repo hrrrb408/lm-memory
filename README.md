@@ -156,9 +156,9 @@ claude mcp add lm_memory -s user -- node /path/to/lm-memory/server/memory-server
 
 ### DSH
 
-正式版 `0.18.1`（GitHub Release 附安装包；npm 同名版本同步发布）。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.18.1.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.1.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
+正式版 `0.19.0`（GitHub Release 附安装包；npm 同名版本同步发布）。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.19.0.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.19.0.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
 
-0.18.1 的默认行为与 0.17.3 相同：按 Git 仓库隔离的项目记忆、用户确认结论/修复经验、事实有效日期、任务候选提示，全部需要显式开启，默认关闭，说明与限制见 `docs/project-memory.md`。
+0.19.0 的默认行为与 0.17.3 相同：按 Git 仓库隔离的项目记忆、用户确认结论/修复经验、事实有效日期、任务候选提示，全部需要显式开启，默认关闭，说明与限制见 `docs/project-memory.md`。
 
 以下是已发布稳定版示例。profile 的 `package.json` 加依赖（建议用 tag 固定版本）：
 
@@ -191,6 +191,10 @@ extract: true           # false = 关闭自动提炼
 ```
 
 自动候选提示与 `refresh` 变更热流相互独立。启用方式、隐私与验收边界见[任务召回指针实验](docs/task-recall-experiment.md)。
+
+### 功能开关（设置页）
+
+**设置 → 记忆库** 里可以开关：项目记忆、确认结论入库、允许外发提炼、任务候选提示（含授权会话 ID）。改动写入 `<memoryDir>/settings.json`，重启 DSH 生效；文件存在时以它为准，其余配置（模型、端口、数据目录）仍来自 `cordis.patch.yml`。不想用页面时二者等价，手写 YAML 仍有效。
 
 ### 项目记忆（可选）
 

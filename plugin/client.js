@@ -15,11 +15,45 @@ window.__ModuleLoader__.load({
 			return response.json();
 		}
 
+		async function postJSON(url, body, signal) {
+			const response = await fetch(url, {
+				method: "POST", signal, redirect: "error", cache: "no-store",
+				headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+			});
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok) throw new Error(data?.error ?? "HTTP " + response.status);
+			return data;
+		}
+
+		const SWITCHES = [
+			{ key: "projectMemory", label: "项目记忆", hint: "按 Git 仓库隔离；开启后不再启用旧 MCP、旧采集与完整管理页" },
+			{ key: "confirmedOutcomes", label: "确认结论入库", hint: "允许用「确认结论：/确认修复：」把上一轮助手原句存为项目事实或经验（需项目记忆）" },
+			{ key: "allowRemote", label: "允许外发提炼", hint: "关闭时完全不出网；开启后才会把复盘交给模型提炼" },
+		];
+
+		function Switch(props) {
+			return createElement("label", {
+				style: { display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0", cursor: "pointer" },
+			},
+				createElement("input", {
+					type: "checkbox", checked: props.checked, disabled: props.disabled,
+					onChange: (event) => props.onChange(event.target.checked),
+					style: { marginTop: 3 },
+				}),
+				createElement("span", null,
+					createElement("span", { style: { fontWeight: 500, fontSize: 13 } }, props.label),
+					createElement("span", { style: { display: "block", fontSize: 12, color: "#777", lineHeight: 1.6 } }, props.hint))
+			);
+		}
+
 		function MemorySection() {
 			const [state, setState] = react.useState({ status: "loading", address: null, items: [] });
+			const [form, setForm] = react.useState(null);
+			const [notice, setNotice] = react.useState(null);
+			const local = () => (window.location.protocol === "dsh-app:" && window.location.hostname === "app") ||
+				["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname);
 			react.useEffect(() => {
-				if (!((window.location.protocol === "dsh-app:" && window.location.hostname === "app") ||
-					["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname))) {
+				if (!local()) {
 					setState({ status: "remote", address: null, items: [] });
 					return;
 				}
@@ -27,6 +61,18 @@ window.__ModuleLoader__.load({
 				const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]);
 				const update = (next) => { if (!controller.signal.aborted) setState(next); };
 				let address = null;
+				readJSON("./api/lm-memory-settings", signal).then((data) => {
+					if (controller.signal.aborted) return;
+					setForm({
+						projectMemory: data?.settings?.projectMemory === true,
+						confirmedOutcomes: data?.settings?.confirmedOutcomes === true,
+						allowRemote: data?.settings?.allowRemote === true,
+						taskRecallEnabled: data?.settings?.taskRecall?.enabled === true,
+						sessionIds: (data?.settings?.taskRecall?.sessionIds ?? []).join(","),
+					});
+					if (data?.restartRequired) setNotice({ kind: "warn", text: "设置已保存，重启 DSH 后生效。" });
+					else if (data?.error) setNotice({ kind: "warn", text: data.error });
+				}).catch(() => { if (!controller.signal.aborted) setNotice({ kind: "warn", text: "无法读取功能开关" }); });
 				readJSON("./api/lm-memory-viewer", signal).then(async ({ port, status }) => {
 					if (status === "disabled" && port === null) { update({ status, address, items: [] }); return; }
 					if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("invalid viewer port");
@@ -50,6 +96,20 @@ window.__ModuleLoader__.load({
 				remote: "管理页仅限运行 DSH 的本机访问",
 			};
 			const kindLabel = { preference: "偏好", fact: "事实", procedure: "经验", todo: "待办", episode: "会话" };
+			const update = (patch) => setForm({ ...form, ...patch });
+			const save = async () => {
+				const ids = String(form.sessionIds ?? "").split(/[\s,]+/).filter(Boolean);
+				setNotice({ kind: "info", text: "保存中…" });
+				try {
+					const data = await postJSON("./api/lm-memory-settings", {
+						projectMemory: form.projectMemory,
+						confirmedOutcomes: form.confirmedOutcomes,
+						allowRemote: form.allowRemote,
+						taskRecall: { enabled: form.taskRecallEnabled, sessionIds: ids },
+					});
+					setNotice({ kind: "ok", text: data?.restartRequired === false ? "已保存（无需重启）。" : "已保存，重启 DSH 后生效。" });
+				} catch (error) { setNotice({ kind: "warn", text: "保存失败：" + (error?.message ?? "未知错误") }); }
+			};
 			return createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16, padding: "0 24px 24px" } },
 				createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
 					createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, "记忆库"),
@@ -61,6 +121,39 @@ window.__ModuleLoader__.load({
 						style: { cursor: "pointer", fontSize: 13, padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit" },
 						href: state.address, target: "_blank", rel: "noopener noreferrer",
 					}, "打开完整管理页（搜索 · 修正 · 删除 · 用户画像）")) : null,
+				form ? createElement("div", { style: { borderTop: "1px solid rgba(128,128,128,.25)", paddingTop: 12 } },
+					createElement("div", { style: { fontWeight: 600, fontSize: 13, marginBottom: 4 } }, "功能开关"),
+					createElement("div", { style: { fontSize: 12, color: "#777", marginBottom: 6 } }, "默认全部关闭，行为与旧版本一致。改动写入 memoryDir/settings.json，重启 DSH 后生效。"),
+					SWITCHES.map((item) => createElement(Switch, {
+						key: item.key, label: item.label, hint: item.hint,
+						checked: form[item.key] === true, disabled: false,
+						onChange: (value) => update({ [item.key]: value }),
+					})),
+					createElement("div", { style: { padding: "8px 0" } },
+						createElement("label", { style: { display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" } },
+							createElement("input", {
+								type: "checkbox", checked: form.taskRecallEnabled,
+								onChange: (event) => update({ taskRecallEnabled: event.target.checked }),
+								style: { marginTop: 3 },
+							}),
+							createElement("span", null,
+								createElement("span", { style: { fontWeight: 500, fontSize: 13 } }, "任务候选提示（实验）"),
+								createElement("span", { style: { display: "block", fontSize: 12, color: "#777", lineHeight: 1.6 } },
+									"回溯型任务出现唯一字面锚点时，追加一个候选编号。改述、同义提问基本不命中，收益未验证。"))),
+						createElement("input", {
+							type: "text", value: form.sessionIds,
+							placeholder: "授权会话 ID，逗号分隔（留空即不生效）",
+							onChange: (event) => update({ sessionIds: event.target.value }),
+							style: { marginTop: 6, width: "100%", fontSize: 12, padding: "6px 8px", borderRadius: 6, border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit" },
+						})),
+					createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", marginTop: 4 } },
+						createElement("button", {
+							onClick: save,
+							style: { cursor: "pointer", fontSize: 13, padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit" },
+						}, "保存设置"),
+						notice ? createElement("span", {
+							style: { fontSize: 12, color: notice.kind === "warn" ? "#b26a00" : notice.kind === "ok" ? "#2e7d32" : "#666" },
+						}, notice.text) : null)) : null,
 				state.items.length ? createElement("div", { style: { fontSize: 12.5, color: "#666" } },
 					"最近记忆：",
 					createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 4 } },
