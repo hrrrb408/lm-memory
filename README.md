@@ -156,7 +156,7 @@ claude mcp add lm_memory -s user -- node /path/to/lm-memory/server/memory-server
 
 ### DSH
 
-正式版 `0.18.1` 已发布到 npm 和 GitHub Release。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.18.1.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.1.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
+正式版 `0.18.1`（GitHub Release 附安装包；npm 同名版本同步发布）。先核对 DSH 版本满足 `>=0.2.2-rc.3 <0.3.0`；在隔离环境打开 **插件 → 添加插件**，输入 `file:` 加下载到的 `dsh-lm-memory-0.18.1.tgz` 绝对路径（Windows 例：`file:C:/LM-Test/dsh-lm-memory-0.18.1.tgz`），按宿主提示重启。包只包含插件；安装依赖可能需要联网，且插件仍需要独立 Node.js ≥22.16。不要因此同意不明构建脚本或版本兼容豁免。
 
 0.18.1 的默认行为与 0.17.3 相同：按 Git 仓库隔离的项目记忆、用户确认结论/修复经验、事实有效日期、任务候选提示，全部需要显式开启，默认关闭，说明与限制见 `docs/project-memory.md`。
 
