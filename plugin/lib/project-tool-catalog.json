@@ -259,6 +259,11 @@
           "type": "boolean",
           "default": false,
           "description": "物理删除该行（含已休眠/已接棒的行），用于隐私擦除；默认 false 为可逆逻辑删除"
+        },
+        "expected_version": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "description": "乐观并发：提供时与当前 version 不符则拒绝（0.19.5）"
         }
       },
       "required": [

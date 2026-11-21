@@ -22,6 +22,7 @@ const cos = (a, b) => {
 };
 const clip = (r) => ({
   id: r.id,
+  version: r.version ?? 1,
   kind: r.kind,
   updated_at: String(r.updated_at || "").slice(0, 10),
   hit_count: r.hit_count ?? 0,
@@ -64,7 +65,7 @@ const isReleaseNote = (row) => {
  */
 export function findConflictPairs(db, { simMin = 0.85, refWindow = 40, maxPairs = 100 } = {}) {
   const rows = db
-    .prepare("SELECT id, kind, hit_count, pinned, updated_at, content, emb FROM memories WHERE status='active' AND emb IS NOT NULL")
+    .prepare("SELECT id, version, kind, hit_count, pinned, updated_at, content, emb FROM memories WHERE status='active' AND emb IS NOT NULL")
     .all();
   const entries = rows.map((r) => ({ row: r, v: blobToF32(r.emb) })).filter((e) => e.v && e.v.length);
   const byId = new Map(entries.map((e) => [e.row.id, e.row]));

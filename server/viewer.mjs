@@ -746,12 +746,17 @@ http.createServer(async (req, res) => {
         const oldRow = ro().prepare("SELECT id, version, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(candidate.old.id);
         const newRow = ro().prepare("SELECT id, version, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(candidate.new.id);
         if (!oldRow || !newRow) return json({ ok: false, msg: "候选对已变化，请刷新后重试" }, 409);
-        const expectOld = Number(body.expected_old_version);
-        if (Number.isSafeInteger(expectOld) && expectOld !== oldRow.version)
-          return json({ ok: false, msg: `旧条版本已变化（当前 v${oldRow.version}），请刷新` }, 409);
+        const expectOld = Number(body.expected_old_version), expectNew = Number(body.expected_new_version);
+        if (!Number.isSafeInteger(expectOld) || !Number.isSafeInteger(expectNew))
+          return json({ ok: false, msg: '缺少 expected_old_version / expected_new_version' }, 400);
+        if (expectOld !== oldRow.version)
+          return json({ ok: false, msg: `旧条版本已变化（当前 v${oldRow.version}），请刷新后重试` }, 409);
+        if (expectNew !== newRow.version)
+          return json({ ok: false, msg: `新条版本已变化（当前 v${newRow.version}），请刷新后重试` }, 409);
         if (verdict === "superseded") {
-          const r = await call("memory_forget", { id: oldRow.id, reason: "conflict-adopt" });
-          if (!String(r).includes("OK")) return json({ ok: false, msg: String(r).slice(0, 80) });
+          // 版本校验下沉：expected_version 由 memory_forget 在写锁事务内原子比对
+          const r = await call("memory_forget", { id: oldRow.id, reason: "conflict-adopt", expected_version: oldRow.version });
+          if (!String(r).includes("OK")) return json({ ok: false, msg: String(r).slice(0, 120) });
           saveConflictReview(oldRow, newRow, verdict);
           auditViewer("conflict_resolve", { old: oldRow.id, new: newRow.id, verdict: "superseded" });
           return json({ ok: true, msg: "已采纳新说法，旧条转为历史（审计可查；默认召回不再返回）" });

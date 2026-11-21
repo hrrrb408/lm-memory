@@ -878,7 +878,11 @@ function renderConflicts() {
         if (!LIVE) { card.classList.add('done'); return toast(text); }
         try {
           if (verdict === 'adopt' && !confirm('采纳新说法：旧条 #' + pair.old.id + ' 将转为历史（逻辑删除，可审计）？')) return;
-          const r = await api('/api/conflict/resolve', { old: pair.old.id, new: pair.new.id, verdict });
+          const r = await api('/api/conflict/resolve', {
+            old: pair.old.id, new: pair.new.id, verdict,
+            expected_old_version: pair.old.version,
+            expected_new_version: pair.new.version,
+          });
           toast(r.msg ?? text);
           if (r.ok) { card.classList.add('done'); await reload(); }
         } catch (e) { toast('操作失败：' + e.message); }

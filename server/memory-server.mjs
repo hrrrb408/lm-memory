@@ -1090,10 +1090,20 @@ server.registerTool("memory_correct", {
 server.registerTool("memory_forget", {
   title: "忘记",
   description: "删除一条记忆。默认逻辑删除（保留 tombstone 供审计，不再被召回）；hard=true 物理擦除该行（隐私purge）。active 与 dormant 均可删。",
-  inputSchema: { id: z.number().int().positive(), reason: z.string().max(500).default(""), hard: z.boolean().default(false).describe("物理删除该行（含已休眠/已接棒的行），用于隐私擦除；默认 false 为可逆逻辑删除") },
-}, async ({ id, reason, hard }) => {
+  inputSchema: { id: z.number().int().positive(), reason: z.string().max(500).default(""), hard: z.boolean().default(false).describe("物理删除该行（含已休眠/已接棒的行），用于隐私擦除；默认 false 为可逆逻辑删除"),
+    expected_version: z.number().int().positive().optional().describe("乐观并发：提供时与当前 version 不符则拒绝（0.19.5）") },
+}, async ({ id, reason, hard, expected_version }) => {
   const any = db.prepare("SELECT id, kind, content, status FROM memories WHERE id=?").get(id);
   if (!any) return ok(`ERROR: id=${id} 不存在。`);
+  if (Number.isSafeInteger(expected_version)) {
+    // 与写入同事务的原子校验：BEGIN IMMEDIATE 拿写锁后再比对，消除检查与删除之间的竞态窗口
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const fresh = db.prepare("SELECT version, status FROM memories WHERE id=?").get(id);
+      if (!fresh || fresh.version !== expected_version) { db.exec("ROLLBACK"); return ok(`VERSION_CONFLICT: id=${id} 当前 v${fresh?.version ?? "不存在"} ≠ 期望 v${expected_version}。请刷新后重试。`); }
+      db.exec("COMMIT");
+    } catch (e) { db.exec("ROLLBACK"); throw e; }
+  }
   if (hard) {
     // v0.15.1 擦除契约（复核实锤旧版 hard 被 active/dormant 过滤挡住）：按 id 物理擦除任何生命周期状态的行。
     // 范围诚实声明：只删此行（含 FTS 索引，触发器联动）——不清理版本链其它行、队列文件、历史热流摘要。

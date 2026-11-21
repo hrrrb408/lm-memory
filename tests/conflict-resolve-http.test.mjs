@@ -15,7 +15,14 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const PORT = 7891;
+// 复审 P2-2：端口由本进程先占一个随机免费端口再立刻释放并传给 viewer，
+// 避免固定端口与其他测试/本机程序冲突，也不会误连到别人的 viewer。
+const { createServer } = await import('node:http');
+const probe = createServer();
+const PORT = await new Promise((resolve, reject) => {
+  probe.once('error', reject);
+  probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+});
 const base = `http://127.0.0.1:${PORT}`;
 const post = (p, body) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -86,17 +93,31 @@ test('conflict resolve endpoint: whitelist, re-check, optimistic version, audit'
   const ghost = await post('/api/conflict/resolve', { old: 999999, new: hi.id, verdict: 'adopt' });
   assert.equal(ghost.status, 409);
 
-  // optimistic version
-  const conflict = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: 99 });
-  assert.equal(conflict.status, 409);
+  // 阶段 A（0.19.5）：版本号必填 + 四种场景
+  const noVersion = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt' });
+  assert.equal(noVersion.status, 400, '缺少版本号必须 400');
 
-  // keep: only writes review cache
-  const keep = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'keep' });
-  assert.equal(keep.status, 200);
-  assert.equal((await keep.json()).ok, true);
+  const staleOld = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version + 99, expected_new_version: hi.version });
+  assert.equal(staleOld.status, 409, '过期旧条版本必须 409');
 
-  // adopt: deletes old row
-  const adopt = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt' });
+  const staleNew = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version, expected_new_version: hi.version + 1 });
+  assert.equal(staleNew.status, 409, '过期新条版本必须 409');
+
+  const rightVersions = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'keep', expected_old_version: lo.version, expected_new_version: hi.version });
+  assert.equal(rightVersions.status, 200, '正确版本通过');
+  assert.equal((await rightVersions.json()).ok, true);
+
+  // adopt: deletes old row（并发修改模拟：先改新条内容再带正确旧版本裁决，新条版本校验应拦截）
+  const bump = new DatabaseSync(path.join(dir, 'memory.db'));
+  bump.prepare('UPDATE memories SET version = version + 1 WHERE id = ?').run(hi.id);
+  bump.close();
+  const concurrent = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version, expected_new_version: hi.version });
+  assert.equal(concurrent.status, 409, '并发修改新条后裁决必须 409');
+  const refreshed = await (await fetch(base + '/api/conflicts')).json();
+  const freshPair = refreshed.pairs.find(p => [p.old.id, p.new.id].includes(lo.id) && [p.old.id, p.new.id].includes(hi.id));
+  assert.ok(freshPair, '409 后候选仍在，可刷新重试');
+  assert.equal(freshPair.new.version, hi.version + 1, 'clip 携带最新 version');
+  const adopt = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version, expected_new_version: hi.version + 1 });
   assert.equal(adopt.status, 200);
   const audit = await (await fetch(base + '/api/audit')).json();
   const resolved = audit.rows.filter(r => r.op === 'conflict_resolve');
