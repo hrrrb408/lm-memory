@@ -1,0 +1,1279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>记忆库 · Lumen 控制台原型</title>
+<style>
+:root{
+  --bg:#05070c; --panel:#0a0e16; --panel2:#0d1219;
+  --ink:#e8edf4; --dim:#8fa0b5; --faint:#5c6b80;
+  --accent:#e8a13a; --accent-strong:#f2b544;
+  --line:rgba(255,255,255,.06); --hairline:rgba(255,255,255,.12);
+  --green:#3fbf8f; --blue:#6aa5e8; --red:#e0605c; --violet:#c9a7e0;
+  --spring:cubic-bezier(.32,.72,0,1);
+  --serif:"Songti SC","STSong","Noto Serif SC",serif;
+  --sans:"PingFang SC","Noto Sans SC",-apple-system,system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1200px 700px at 82% -12%, rgba(242,181,68,.06), transparent 60%),
+    radial-gradient(900px 600px at 6% 108%, rgba(14,32,25,.5), transparent 62%),
+    var(--bg);
+  color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6;
+  min-height:100vh;overflow-x:clip;
+}
+body::after{content:"";position:fixed;inset:0;z-index:90;pointer-events:none;opacity:.045;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.6'/></svg>")}
+.shell{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100vh}
+
+/* ---------- 侧栏 ---------- */
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;
+  border-right:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(10,14,22,.9),rgba(6,8,13,.94));padding:24px 0 18px}
+.brand{display:flex;align-items:center;gap:12px;padding:0 24px 30px}
+.brand .dot{width:10px;height:10px;border-radius:50%;background:var(--accent-strong);
+  box-shadow:0 0 20px 5px rgba(242,181,68,.5);animation:breathe 8s ease-in-out infinite;flex:none}
+.brand .t{font-family:var(--serif);font-size:16px;letter-spacing:.24em}
+.brand .s{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.3em;color:var(--faint);margin-top:2px}
+.group{margin-bottom:6px}
+.group .cap{font-family:var(--mono);font-size:9px;letter-spacing:.3em;color:var(--faint);padding:18px 24px 8px}
+.item{position:relative;display:flex;align-items:center;gap:12px;padding:10px 24px;border-left:2px solid transparent;
+  font-size:13.5px;color:var(--dim);cursor:pointer;transition:background .35s var(--spring),color .35s var(--spring),border-color .35s var(--spring)}
+.item svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.4;opacity:.75;flex:none}
+.item:hover{background:rgba(255,255,255,.03);color:var(--ink)}
+.item.on{color:var(--ink);background:rgba(242,181,68,.06);border-left-color:var(--accent-strong)}
+.item.on svg{opacity:1;stroke:var(--accent-strong)}
+.item .n{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.04em}
+.item.alert .n{color:var(--red);border:1px solid rgba(224,96,92,.35);background:rgba(224,96,92,.16);border-radius:999px;padding:0 8px}
+.status{margin:auto 14px 0;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.015);padding:14px 16px}
+.status .row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.74rem;color:var(--dim);padding:4px 0}
+.status .row b{font-family:var(--mono);font-size:.68rem;font-weight:400;color:var(--ink);letter-spacing:.02em}
+.status .pt{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--green)}
+.status .pt::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;box-shadow:0 0 8px rgba(63,191,143,.7)}
+.status .pt.blue{color:var(--blue)}
+.status .pt.blue::before{box-shadow:0 0 8px rgba(106,165,232,.7)}
+.foot{padding:14px 0 0;text-align:center;font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;color:var(--faint)}
+
+/* ---------- 顶栏 ---------- */
+.top{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:20px;
+  padding:20px 32px;border-bottom:1px solid var(--line);
+  background:rgba(6,8,13,.88);backdrop-filter:blur(12px)}
+.top h1{font-family:var(--serif);font-weight:400;font-size:1.15rem;letter-spacing:.14em;white-space:nowrap}
+.search{margin-left:auto;display:flex;align-items:center;gap:10px;width:min(360px,42vw);
+  border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:rgba(255,255,255,.02);
+  transition:border-color .4s var(--spring),box-shadow .4s var(--spring)}
+.search:focus-within{border-color:rgba(242,181,68,.4);box-shadow:0 0 24px rgba(242,181,68,.12)}
+.search input{flex:1;background:none;border:0;outline:0;color:var(--ink);font-size:.82rem;font-family:var(--sans)}
+.search input::placeholder{color:var(--faint)}
+.search kbd{font-family:var(--mono);font-size:.62rem;color:var(--faint);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.clock{font-family:var(--mono);font-size:.74rem;letter-spacing:.14em;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--accent-strong),#a86a1c);
+  display:flex;align-items:center;justify-content:center;font-size:.8rem;color:#0b0e14;font-weight:600;flex:none}
+
+.content{padding:28px 32px 60px}
+.view{display:none}
+.view.on{display:block;animation:viewIn .5s var(--spring)}
+@keyframes viewIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ---------- KPI ---------- */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:22px}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:20px 22px;position:relative;overflow:hidden;
+  transition:border-color .45s var(--spring),transform .45s var(--spring)}
+.kpi:hover{border-color:rgba(242,181,68,.35);transform:translateY(-2px)}
+.kpi .label{font-family:var(--mono);font-size:.62rem;letter-spacing:.24em;color:var(--dim);display:block;margin-bottom:10px}
+.kpi .num{font-family:var(--mono);font-size:1.7rem;font-weight:400;letter-spacing:.01em;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi .num i{font-style:normal;color:var(--accent-strong)}
+.kpi .delta{display:inline-flex;align-items:center;gap:5px;margin-top:10px;font-family:var(--mono);font-size:.66rem;color:var(--faint)}
+.kpi .delta.up{color:var(--green)}
+.kpi.alert{border-color:rgba(224,96,92,.3)}
+.kpi.alert .num,.kpi.alert .num i{color:var(--red)}
+.kpi.alert::after{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--red),transparent 70%)}
+.kpi.link{cursor:pointer}
+
+/* ---------- 卡片 ---------- */
+.charts{display:grid;grid-template-columns:7fr 5fr;gap:16px;margin-bottom:22px}
+.card{background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:22px 24px;min-width:0;overflow:hidden}
+.card-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px;gap:12px}
+.card-head h3{font-family:var(--serif);font-weight:400;font-size:1.02rem;letter-spacing:.1em}
+.card-head .meta{font-family:var(--mono);font-size:.64rem;letter-spacing:.16em;color:var(--faint)}
+.chart-box{flex:1;display:flex;align-items:center}
+.chart-box svg{width:100%;display:block}
+.charts .card{display:flex;flex-direction:column}
+.charts .legend{margin-top:auto}
+.legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px}
+.legend .li{display:flex;align-items:center;gap:8px;font-size:.76rem;color:var(--dim)}
+.legend .sw{width:9px;height:9px;border-radius:3px;display:inline-block}
+.live{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:.66rem;letter-spacing:.2em;color:var(--green)}
+.live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px rgba(63,191,143,.8);animation:pulse 1.8s ease-in-out infinite}
+.js .chart-line{stroke-dasharray:1200;stroke-dashoffset:1200;animation:draw 1.8s var(--spring) .3s forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.js .chart-area{opacity:0;animation:fadeA 1s ease .9s forwards}
+@keyframes fadeA{to{opacity:1}}
+.static .chart-line{stroke-dasharray:none;stroke-dashoffset:0;animation:none}
+.static .chart-area{opacity:1;animation:none}
+.donut-wrap{display:flex;align-items:center;gap:26px}
+.dlist{flex:1;min-width:0}
+.drow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.8rem}
+.drow:last-child{border-bottom:none}
+.drow .sw{width:9px;height:9px;border-radius:3px;flex:none}
+.drow .dn{color:var(--dim);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drow .dn em{font-family:var(--mono);font-size:.66rem;font-style:normal;color:var(--faint);margin-left:7px;letter-spacing:.08em}
+.drow .dv{font-family:var(--mono);font-size:.74rem;color:var(--ink);font-variant-numeric:tabular-nums}
+.drow .dp{font-family:var(--mono);font-size:.68rem;color:var(--faint);width:46px;text-align:right}
+
+/* ---------- 表格 ---------- */
+.table-card{background:var(--panel2);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.table-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 16px;gap:16px;flex-wrap:wrap}
+.table-head h3{font-family:var(--serif);font-weight:400;font-size:1.02rem;letter-spacing:.1em}
+.btn-mini{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;color:var(--accent);
+  border:1px solid rgba(232,161,58,.4);background:rgba(232,161,58,.07);border-radius:999px;padding:7px 18px;cursor:pointer;
+  transition:background .4s var(--spring),box-shadow .4s var(--spring)}
+.btn-mini:hover{background:rgba(232,161,58,.16);box-shadow:0 0 20px rgba(242,181,68,.18)}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+.c-status{width:104px}.c-time{width:96px}.c-type{width:132px}.c-src{width:96px}.c-act{width:92px}
+th{font-family:var(--mono);font-size:.62rem;letter-spacing:.22em;color:var(--faint);font-weight:400;text-align:left;
+  padding:10px 20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.02);white-space:nowrap}
+td{padding:14px 20px;border-bottom:1px solid var(--line);font-size:.83rem;vertical-align:middle}
+tbody tr{cursor:pointer;transition:background .35s var(--spring)}
+tbody tr:hover{background:rgba(242,181,68,.045)}
+tbody tr:hover .mem-text{color:var(--ink)}
+tr.conflict{background:rgba(224,96,92,.05)}
+tr.conflict:hover{background:rgba(224,96,92,.09)}
+.mem-text{color:var(--dim);transition:color .35s var(--spring);display:block;max-width:56ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.td-time{font-family:var(--mono);font-size:.72rem;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums}
+.td-type{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;color:var(--dim);white-space:nowrap}
+.td-hit{font-family:var(--mono);font-size:.74rem;font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+.hit-bar{display:inline-block;width:52px;height:3px;border-radius:2px;background:rgba(255,255,255,.08);margin-left:10px;vertical-align:middle;position:relative;overflow:hidden}
+.hit-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:2px}
+.tag{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;border-radius:999px;padding:3px 11px;white-space:nowrap}
+.tag::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+.tag.active{color:var(--accent);border:1px solid rgba(232,161,58,.4);background:rgba(242,181,68,.07)}
+.tag.pin{color:var(--blue);border:1px solid rgba(106,165,232,.4);background:rgba(106,165,232,.08)}
+.tag.sleep{color:var(--dim);border:1px solid var(--hairline);background:rgba(255,255,255,.03)}
+.tag.conflict{color:var(--red);border:1px solid rgba(224,96,92,.4);background:rgba(224,96,92,.08)}
+.row-act{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);
+  border-radius:999px;padding:5px 14px;white-space:nowrap;cursor:pointer;background:none;
+  transition:color .35s var(--spring),border-color .35s var(--spring)}
+.row-act:hover{color:var(--accent);border-color:rgba(232,161,58,.45)}
+.row-act.warn{color:var(--red);border-color:rgba(224,96,92,.35)}
+.t-audit .a-op{width:196px}
+.t-audit .a-by{width:106px}
+.td-type{overflow:hidden;text-overflow:ellipsis}
+.srcdot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:7px;vertical-align:middle;background:var(--faint)}
+.srcdot.auto{background:var(--red)}
+.srcdot.session{background:var(--blue)}
+.srcdot.summary{background:var(--dim)}
+.srcdot.lifeos{background:var(--ok,#3fbf8f)}
+.srcdot.manual{background:var(--accent)}
+.empty-row td{text-align:center;color:var(--faint);padding:36px;font-size:.84rem}
+
+/* ---------- chips ---------- */
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.chip{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;color:var(--dim);border:1px solid var(--line);
+  border-radius:999px;padding:6px 16px;cursor:pointer;background:none;transition:all .4s var(--spring)}
+.chip:hover{color:var(--ink);border-color:var(--hairline)}
+.chip.on{color:#0b0e14;background:var(--accent-strong);border-color:var(--accent-strong)}
+
+/* ---------- 冲突卡 ---------- */
+.conflict-card{background:var(--panel2);border:1px solid rgba(224,96,92,.3);border-radius:16px;padding:24px 26px;margin-bottom:18px;
+  transition:opacity .6s var(--spring),transform .6s var(--spring)}
+.conflict-card.done{opacity:.45}
+.cc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:12px;flex-wrap:wrap}
+.cc-title{font-size:.9rem}
+.cc-title .meta{font-family:var(--mono);font-size:.66rem;color:var(--faint);letter-spacing:.1em;margin-left:12px}
+.cc-versions{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cc-ver{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:rgba(255,255,255,.02);cursor:pointer;
+  transition:border-color .4s var(--spring),background .4s var(--spring)}
+.cc-ver:hover{border-color:rgba(242,181,68,.35);background:rgba(242,181,68,.04)}
+.cc-ver .vh{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.open-hint{margin-left:auto;font-family:var(--mono);font-size:.6rem;letter-spacing:.12em;color:var(--faint);opacity:0;transition:opacity .35s var(--spring),color .35s var(--spring)}
+.cc-ver:hover .open-hint{opacity:1;color:var(--accent)}
+.cc-ver p{font-size:.79rem;color:var(--dim);line-height:1.7}
+.cc-acts{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+
+/* ---------- 模态 ---------- */
+.modal{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;padding:40px;background:rgba(3,5,9,.72);backdrop-filter:blur(6px)}
+.modal.on{display:flex;animation:fadeA .3s ease both}
+.sheet{width:min(760px,100%);max-height:82vh;overflow:auto;border:1px solid var(--hairline);border-radius:18px;
+  background:linear-gradient(180deg,#0c1119,#080c13);padding:26px 28px 22px;box-shadow:0 40px 120px -40px rgba(0,0,0,.9)}
+.sheet h3{font-family:var(--serif);font-weight:400;font-size:1.2rem;letter-spacing:.12em;margin-bottom:6px}
+.sheet .meta{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;color:var(--faint);display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.sheet .body{font-size:.9rem;line-height:1.85;white-space:pre-wrap;word-break:break-word}
+.sheet .tagline{margin-top:14px;font-family:var(--mono);font-size:.68rem;color:var(--faint);word-break:break-all}
+.sheet .acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.toast{position:fixed;right:24px;top:20px;z-index:95;transform:translateX(140%);opacity:0;
+  transition:transform .5s var(--spring),opacity .4s;border:1px solid rgba(242,181,68,.35);background:rgba(16,20,28,.96);
+  font-size:.78rem;padding:10px 16px;border-radius:12px;box-shadow:0 20px 60px -20px rgba(0,0,0,.9);max-width:340px}
+.toast.on{transform:none;opacity:1}
+
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:rgba(242,181,68,.3)}
+::-webkit-scrollbar-track{background:transparent}
+@keyframes breathe{0%,100%{box-shadow:0 0 18px 4px rgba(242,181,68,.4)}50%{box-shadow:0 0 30px 10px rgba(242,181,68,.6)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.static *{animation:none!important;transition:none!important}
+
+@media (max-width:1400px){
+  td,th{padding-left:14px;padding-right:14px}
+  .c-status{width:92px}.c-time{width:88px}.c-type{width:118px}.c-src{width:80px}.c-act{width:72px}
+  .mem-text{max-width:38ch}
+}
+@media (max-width:1180px){.kpis{grid-template-columns:repeat(3,1fr)}.charts{grid-template-columns:1fr}}
+@media (max-width:860px){
+  .shell{grid-template-columns:1fr}
+  .side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:12px 10px;gap:6px;overflow:hidden}
+  .item{border-left-width:0;padding:8px 10px;border-radius:8px}
+  .brand{padding:0 12px 0 0}
+  .group{display:flex;flex-wrap:wrap;gap:6px;padding:0;margin:0;min-width:0}
+  .group .cap,.status,.foot{display:none}
+  .top{padding:14px 18px;flex-wrap:wrap}
+  .search{width:100%;margin-left:0;order:3}
+  .content{padding:20px 18px 40px}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .cc-versions{grid-template-columns:1fr}
+  .mem-text{max-width:26ch}
+  .donut-wrap{flex-direction:column;align-items:flex-start}
+}
+@media (max-width:1100px){
+  .c-src{display:none}
+  .mem-text{max-width:30ch}
+}
+@media (max-width:820px){
+  .c-act,th.c-act{display:none}
+}
+@media (max-width:700px){
+  .c-time,th.c-time{display:none}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span><span><span class="t">记忆库</span><span class="s">LIVING MEMORY</span></span></div>
+
+    <div class="group">
+      <div class="cap">监控</div>
+      <div class="item" data-go="overview"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>总览<span class="n" id="b-total">0</span></div>
+      <div class="item" data-go="events"><svg viewBox="0 0 16 16"><path d="M2 12l3-4 3 2 6-7"/></svg>事件流<span class="n" id="b-events">0</span></div>
+      <div class="item" data-go="profile"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.6"/><path d="M2.8 14c.6-2.7 2.7-4.2 5.2-4.2s4.6 1.5 5.2 4.2"/></svg>用户画像</div>
+      <div class="item" data-go="all"><svg viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>全部条目<span class="n" id="b-all">0</span></div>
+      <div class="item" data-go="pinned"><svg viewBox="0 0 16 16"><path d="M4 2h8v12l-4-3-4 3z"/></svg>置顶<span class="n" id="b-pin">0</span></div>
+      <div class="item" data-go="dormant"><svg viewBox="0 0 16 16"><path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z"/></svg>休眠队列<span class="n" id="b-dorm">0</span></div>
+    </div>
+
+    <div class="group">
+      <div class="cap">维护</div>
+      <div class="item alert" data-go="conflicts"><svg viewBox="0 0 16 16"><path d="M8 2v9M8 13.5v.5"/></svg>冲突裁决<span class="n" id="b-conf">0</span></div>
+      <div class="item" data-go="graph"><svg viewBox="0 0 16 16"><circle cx="4" cy="5" r="1.6"/><circle cx="12" cy="4" r="1.6"/><circle cx="9" cy="12" r="1.6"/><path d="M5.4 5.6l5.2-1M5.1 6.3l3 4.4M10.8 5.1l-1.2 5.3"/></svg>关联图谱<span class="n" id="b-graph">0</span></div>
+      <div class="item" data-go="signals"><svg viewBox="0 0 16 16"><path d="M2 12l3.5-5 3 3L14 4"/></svg>标签来源</div>
+    </div>
+
+    <div class="group">
+      <div class="cap">系统</div>
+      <div class="item" id="engine-info"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4"/></svg>引擎信息</div>
+      <div class="item" data-go="audit"><svg viewBox="0 0 16 16"><path d="M3 3h10v10H3z"/><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3"/></svg>审计日志<span class="n" id="b-audit">0</span></div>
+      <div class="item" id="copy-db"><svg viewBox="0 0 16 16"><path d="M3 5.5h10v8H3z"/><path d="M5.5 5.5V2.5h8v8h-3"/></svg>数据目录</div>
+    </div>
+
+    <div class="status">
+      <div class="row"><span>引擎状态</span><span class="pt">运行中</span></div>
+      <div class="row"><span>SQLite</span><span class="pt blue">正常</span></div>
+      <div class="row"><span>休眠队列</span><b id="s-dorm">0 条</b></div>
+      <div class="row"><span>快照时间</span><b id="s-snap">刚刚</b></div>
+    </div>
+    <div class="foot">LM-MEMORY V<span id="f-ver">0.0.0</span></div>
+  </aside>
+
+  <main>
+    <div class="top">
+      <h1 id="page-title">总览</h1>
+      <label class="search">
+        <span style="color:var(--faint)" aria-hidden="true">⌕</span>
+        <input id="q" type="search" placeholder="检索记忆：内容或标签" aria-label="检索记忆">
+        <kbd>⌘K</kbd>
+      </label>
+      <span class="clock" id="clock">--:--:--</span>
+      <span class="avatar">记</span>
+    </div>
+
+    <div class="content">
+      <section class="view on" id="view-overview">
+        <div class="kpis">
+          <div class="card kpi"><span class="label">活跃记忆</span><div class="num"><i data-count="total">0</i></div><span class="delta up" id="d-recent">近 7 天</span></div>
+          <div class="card kpi"><span class="label">置顶</span><div class="num" data-count="pinned">0</div><span class="delta">整条进启动索引</span></div>
+          <div class="card kpi"><span class="label">休眠</span><div class="num" data-count="dormant">0</div><span class="delta">长期未召回</span></div>
+          <div class="card kpi"><span class="label">会话来源</span><div class="num" data-count="sessions">0</div><span class="delta">可追溯对话数</span></div>
+          <div class="card kpi alert link" data-go="conflicts"><span class="label">待裁决冲突</span><div class="num"><i data-count="conflicts">0</i></div><span class="delta">点击前往裁决</span></div>
+        </div>
+
+        <div class="charts">
+          <div class="card">
+            <div class="card-head"><h3>写入趋势 · 近 14 天</h3><span class="live">LIVE TOTAL <span id="trend-total">0</span></span></div>
+            <div class="chart-box"><svg id="trend" viewBox="0 0 720 300" role="img" aria-label="近十四天写入趋势"></svg></div>
+            <div class="legend"><div class="li"><span class="sw" style="background:var(--accent-strong)"></span>每日新增记忆</div><div class="li"><span class="sw" style="background:rgba(242,181,68,.16)"></span>面积渐变</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>记忆类型分布</h3><span class="meta">BY KIND</span></div>
+            <div class="donut-wrap">
+              <svg id="donut" width="150" height="150" viewBox="0 0 150 150" role="img" aria-label="记忆类型分布"></svg>
+              <div class="dlist" id="donut-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="table-head"><h3>最近写入的记忆</h3><button class="btn-mini" data-go="all">查看全部</button></div>
+          <table><thead><tr><th class="c-status">状态</th><th class="c-time">写入时间</th><th class="c-type">类型</th><th>内容摘要</th><th class="c-src">版本</th><th class="c-act">操作</th></tr></thead>
+          <tbody id="recent-rows"></tbody></table>
+        </div>
+      </section>
+
+      <section class="view" id="view-events">
+        <div class="kpis">
+          <div class="card kpi"><span class="label">近 24 小时事件</span><div class="num" data-count="last24">0</div><span class="delta">变更流总条数</span></div>
+          <div class="card kpi"><span class="label">新增记忆</span><div class="num" data-count="writes24">0</div><span class="delta">写入类事件</span></div>
+          <div class="card kpi"><span class="label">修正</span><div class="num" data-count="corrections24">0</div><span class="delta">生成新版本</span></div>
+          <div class="card kpi alert"><span class="label">失败任务</span><div class="num"><i data-count="failures24">0</i></div><span class="delta">提炼超时或模型报错</span></div>
+          <div class="card kpi"><span class="label">最近冲突扫描</span><div class="num"><i id="sweep">0</i></div><span class="delta">组待复核</span></div>
+        </div>
+        <div class="charts">
+          <div class="card">
+            <div class="card-head"><h3>事件密度 · 近 24 小时</h3><span class="live">LIVE <span id="events-total">0</span></span></div>
+            <div class="chart-box"><svg id="hours" viewBox="0 0 720 300" role="img" aria-label="近二十四小时事件密度"></svg></div>
+            <div class="legend"><div class="li"><span class="sw" style="background:var(--accent-strong)"></span>每小时变更条数</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>异常</h3><span class="meta" id="fail-meta">来自审计日志</span></div>
+            <div id="failure-list" style="display:grid;gap:10px"></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="table-head"><h3>最近变更</h3><span class="meta">点击行查看对应记忆</span></div>
+          <table><thead><tr><th class="c-status">事件</th><th class="c-time">时间</th><th class="c-type">对象</th><th>摘要</th><th class="c-src">类型</th><th class="c-act">操作</th></tr></thead>
+          <tbody id="event-rows"></tbody></table>
+        </div>
+      </section>
+
+      <section class="view" id="view-profile">
+        <div class="kpis">
+          <div class="card kpi"><span class="label">身份线索</span><div class="num" data-count="pId">0</div><span class="delta">事实类条目</span></div>
+          <div class="card kpi"><span class="label">偏好</span><div class="num" data-count="pPref">0</div><span class="delta">沟通与审美</span></div>
+          <div class="card kpi"><span class="label">待办</span><div class="num" data-count="pTodo">0</div><span class="delta">未完成事项</span></div>
+          <div class="card kpi"><span class="label">经验</span><div class="num" data-count="pProc">0</div><span class="delta">可复用做法</span></div>
+          <div class="card kpi"><span class="label">会话摘要</span><div class="num" data-count="pEp">0</div><span class="delta">近期对话</span></div>
+        </div>
+        <div class="charts" style="grid-template-columns:1.35fr 1fr">
+          <div class="card">
+            <div class="card-head"><h3>画像正文</h3><span style="display:flex;align-items:center;gap:10px"><span class="meta" id="p-time">生成于</span><span id="p-lag"></span></span></div>
+            <div id="profile-body" style="display:grid;gap:10px"></div>
+            <div class="legend" style="justify-content:space-between">
+              <span style="font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;color:var(--faint)">由模型从记忆库归纳，可能滞后于最新写入</span>
+              <button class="btn-mini" id="p-refresh">重新生成</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>关键词</h3><span class="meta">BY FREQUENCY</span></div>
+            <div id="p-keywords" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+            <div class="card-head" style="margin-top:22px"><h3>取样</h3><span class="meta">最近写入</span></div>
+            <div id="p-samples"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-all">
+        <div class="chips" id="kind-chips"></div>
+        <div class="table-card">
+          <div class="table-head"><h3>全部条目</h3><span class="meta" id="all-count"></span></div>
+          <table><thead><tr><th class="c-status">状态</th><th class="c-time">写入时间</th><th class="c-type">类型</th><th>内容摘要</th><th class="c-src">版本</th><th class="c-act">操作</th></tr></thead>
+          <tbody id="all-rows"></tbody></table>
+          <div class="empty-row" id="all-empty" hidden><table><tbody><tr><td>没有符合条件的记忆</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-pinned">
+        <div class="table-card">
+          <div class="table-head"><h3>置顶记忆</h3><span class="meta">整条展开进启动索引</span></div>
+          <table><thead><tr><th class="c-status">状态</th><th class="c-time">写入时间</th><th class="c-type">类型</th><th>内容摘要</th><th class="c-src">版本</th><th class="c-act">操作</th></tr></thead>
+          <tbody id="pin-rows"></tbody></table>
+          <div class="empty-row" id="pin-empty" hidden><table><tbody><tr><td>当前没有置顶记忆</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-dormant">
+        <div class="kpis">
+          <div class="card kpi"><span class="label">休眠中</span><div class="num" data-count="dormantCount">0</div><span class="delta">默认召回不含</span></div>
+          <div class="card kpi"><span class="label">置顶豁免</span><div class="num" data-count="pinnedCount">0</div><span class="delta">置顶永不休眠</span></div>
+          <div class="card kpi"><span class="label">可唤醒</span><div class="num">可</div><span class="delta">memory_pin wake</span></div>
+          <div class="card kpi"><span class="label">恢复策略</span><div class="num" style="font-size:1.05rem">降可见度</div><span class="delta">不是删除</span></div>
+          <div class="card kpi"><span class="label">最近整理</span><div class="num" style="font-size:1.05rem" id="sweep-time">待运行</div><span class="delta">sleep_pass</span></div>
+        </div>
+        <div class="table-card">
+          <div class="table-head"><h3>休眠队列</h3><button class="btn-mini" id="sleep-run">运行休眠整理</button></div>
+          <table><thead><tr><th class="c-status">状态</th><th class="c-time">转入时间</th><th class="c-type">类型</th><th>内容摘要</th><th class="c-src">命中</th><th class="c-act">操作</th></tr></thead>
+          <tbody id="dormant-rows"></tbody></table>
+          <div class="card" style="margin:0;border:0;border-top:1px solid var(--line);border-radius:0;background:none">
+            <div style="font-size:.76rem;color:var(--faint);line-height:1.8">
+              规则：置顶永不休眠；召回与反馈会续租；休眠只是降低可见度，条目仍在库里，<span style="font-family:var(--mono)">scope:"dormant"</span> 可查、可唤醒。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-audit">
+        <div class="kpis">
+          <div class="card kpi"><span class="label">审计事件</span><div class="num" data-count="auditRows">0</div><span class="delta">最近样本</span></div>
+          <div class="card kpi"><span class="label">操作类型</span><div class="num" data-count="auditOps">0</div><span class="delta">去重后</span></div>
+          <div class="card kpi alert"><span class="label">失败记录</span><div class="num"><i id="audit-fail">0</i></div><span class="delta">提炼或复核出错</span></div>
+          <div class="card kpi"><span class="label">写入类</span><div class="num" id="audit-write">0</div><span class="delta">remember / correct</span></div>
+          <div class="card kpi"><span class="label">后台任务</span><div class="num" id="audit-job">0</div><span class="delta">派发 / 领取 / 结算</span></div>
+        </div>
+        <div class="chips" id="audit-chips"></div>
+        <div class="table-card">
+          <div class="table-head"><h3>审计日志</h3><span class="meta" id="audit-count"></span></div>
+          <table class="t-audit"><thead><tr><th class="c-status">状态</th><th class="c-time">时间</th><th class="a-op">操作</th><th class="a-by">来源</th><th>详情</th></tr></thead>
+          <tbody id="audit-rows"></tbody></table>
+        </div>
+      </section>
+
+      <section class="view" id="view-conflicts">
+        <div style="font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;color:var(--faint);margin-bottom:14px">点任一卡片查看全文与来源回查，看完再决定采纳或保留</div>
+        <div id="pairs"></div>
+      </section>
+
+      <section class="view" id="view-graph">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-head"><h3>邻域速写</h3><span class="meta">最活跃节点的直接连线</span></div>
+          <div class="chart-box"><svg id="neighbourhood" viewBox="0 0 720 360" role="img" aria-label="最活跃记忆的邻域"></svg></div>
+          <div class="legend" id="hub-legend"></div>
+        </div>
+        <div class="charts">
+          <div class="card"><div class="card-head"><h3>关系分布</h3><span class="meta">条数</span></div><div id="rel-bars"></div></div>
+          <div class="card"><div class="card-head"><h3>连线最多</h3><span class="meta">度 · 上限 32</span></div><div id="degree-bars"></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-signals">
+        <div class="charts">
+          <div class="card"><div class="card-head"><h3>标签占比</h3><span class="meta">按出现次数</span></div><div id="tag-bars"></div></div>
+          <div class="card">
+            <div class="card-head"><h3>来源说明</h3><span class="meta">只读</span></div>
+            <div style="display:grid;gap:12px;font-size:.78rem;color:var(--dim);line-height:1.8">
+              <div><span class="tag conflict">自动提炼</span> 未经过语义验证，引用前先用来源回查。</div>
+              <div><span class="tag pin">会话</span> 带会话编号，可追溯到具体一次对话。</div>
+              <div><span class="tag sleep">摘要</span> 会话摘要，用于跨会话复述，不承载细节。</div>
+              <div><span class="tag active">正册</span> 来自 LifeOS 串库写入，与正册档案互为指针。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+  <div class="sheet">
+    <h3 id="m-title">记忆详情</h3>
+    <div class="meta"><span id="m-id"></span><span id="m-kind"></span><span id="m-date"></span><span id="m-ver"></span><span id="m-hit"></span></div>
+    <div class="body" id="m-body"></div>
+    <div class="tagline" id="m-tags"></div>
+    <div id="m-source" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px"></div>
+    <div class="acts">
+      <button class="btn-mini" id="m-adopt" hidden>采纳这一版</button>
+      <button class="btn-mini" id="m-keep" hidden style="color:var(--dim);border-color:var(--line);background:none">保留另一版</button>
+      <button class="btn-mini" data-act="copy">复制内容</button>
+      <button class="btn-mini" data-act="pin">置顶</button>
+      <button class="btn-mini" data-act="correct">修正</button>
+      <button class="btn-mini" data-act="forget" style="color:var(--red);border-color:rgba(224,96,92,.35);background:rgba(224,96,92,.07)">删除</button>
+      <button class="btn-mini" data-act="close" style="margin-left:auto">关闭</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>window.onerror = function (m) { document.title = 'ERR ' + m; };</script>
+<script>
+const SNAPSHOT = /*__DATA__*/null;
+const LIVE = SNAPSHOT === null;
+let DATA = SNAPSHOT;
+const $ = s => document.querySelector(s);
+const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
+const fmt = n => Number(n).toLocaleString('en-US');
+const KIND = { fact: '事实', procedure: '经验', preference: '偏好', episode: '会话', todo: '待办' };
+const KIND_EN = { fact: 'fact', procedure: 'procedure', preference: 'preference', episode: 'episode', todo: 'todo' };
+const SOURCE = { auto: '自动提炼', session: '会话', summary: '摘要', lifeos: '正册', manual: '手工' };
+const STATUS = { active: ['活跃', 'active'], pin: ['置顶', 'pin'], conflict: ['冲突待裁', 'conflict'], sleep: ['休眠', 'sleep'] };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const day = v => new Date(v).toLocaleDateString('sv', { timeZone: 'Asia/Shanghai' });
+
+let current = null;
+let kind = 'all';
+let query = '';
+
+function toast(text) {
+  const t = $('#toast');
+  t.textContent = text;
+  t.classList.add('on');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove('on'), 2800);
+}
+
+function countUp(node, value) {
+  if (node.dataset.done === '1') return;
+  node.dataset.done = '1';
+  if (document.body.classList.contains('static') || matchMedia('(prefers-reduced-motion: reduce)').matches) { node.textContent = fmt(value); return; }
+  const t0 = performance.now();
+  const step = now => {
+    const p = Math.min(1, (now - t0) / 1200);
+    node.textContent = fmt(Math.round(value * (1 - Math.pow(1 - p, 3))));
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function match(item) {
+  if (kind !== 'all' && item.kind !== kind) return false;
+  if (!query) return true;
+  return (item.content + ' ' + item.tags).toLowerCase().includes(query);
+}
+
+function row(item) {
+  const tr = el('tr');
+  if (item.status === 'conflict') tr.className = 'conflict';
+  const [label, cls] = STATUS[item.status] ?? STATUS.active;
+  tr.innerHTML = '<td class="c-status"><span class="tag ' + cls + '">' + label + '</span></td>'
+    + '<td class="td-time c-time">' + day(item.date).slice(5) + ' ' + item.time + '</td>'
+    + '<td class="td-type c-type"><span class="srcdot ' + item.source + '" title="来源：' + (SOURCE[item.source] ?? item.source) + '"></span>' + (KIND_EN[item.kind] ?? item.kind).toUpperCase() + '</td>'
+    + '<td><span class="mem-text">' + esc(item.content) + '</span></td>'
+    + '<td class="td-hit c-src">v' + item.version + '<span class="hit-bar"><i style="width:' + Math.min(100, 24 + item.version * 14) + '%"></i></span></td>'
+    + '<td class="c-act"><button class="row-act" type="button">审计</button></td>';
+  tr.addEventListener('click', () => openDetail(item));
+  return tr;
+}
+
+function fill(target, list, empty) {
+  const body = $(target);
+  body.replaceChildren();
+  const shown = list.slice(0, 120);
+  for (const item of shown) body.appendChild(row(item));
+  if (!shown.length) {
+    const tr = el('tr', 'empty-row');
+    tr.innerHTML = '<td colspan="6">没有符合条件的记忆</td>';
+    body.appendChild(tr);
+  }
+  if (empty) $(empty).hidden = shown.length > 0;
+  return shown.length;
+}
+
+function renderAll() {
+  const list = DATA.items.filter(match).sort((a, b) => b.id - a.id);
+  fill('#all-rows', list);
+  $('#all-count').textContent = fmt(list.length) + ' / ' + fmt(DATA.total);
+}
+function renderPinned() { fill('#pin-rows', DATA.items.filter(i => i.pinned === 1 && match(i))); }
+function renderRecent() { fill('#recent-rows', [...DATA.items].sort((a, b) => b.id - a.id).slice(0, 7)); }
+
+const OPLABEL = { remember: '新增', episode: '会话卡', ingest: '入库', correct: '修正', forget: '删除', conflict_sweep: '冲突扫描', dormant: '休眠' };
+const OPCLASS = { remember: 'active', episode: 'sleep', ingest: 'pin', correct: 'pin', forget: 'conflict', conflict_sweep: 'conflict', dormant: 'sleep' };
+
+function renderHours() {
+  const svg = $('#hours');
+  const W = 720, H = 300, L = 40, R = 16, T = 24, B = 38;
+  const s = DATA.monitor.hours;
+  const max = Math.max(1, ...s.map(p => p.n));
+  const bw = (W - L - R) / s.length;
+  let out = '';
+  for (let g = 0; g <= 3; g++) {
+    const y = T + (g / 3) * (H - T - B);
+    out += '<line x1="' + L + '" y1="' + y + '" x2="' + (W - R) + '" y2="' + y + '" stroke="rgba(255,255,255,.045)" stroke-dasharray="2 4"/>';
+    out += '<text x="' + (L - 8) + '" y="' + (y + 3) + '" fill="#5c6b80" font-size="9.5" font-family="ui-monospace,monospace" text-anchor="end">' + Math.round(max * (1 - g / 3)) + '</text>';
+  }
+  s.forEach((p, i) => {
+    const h = (p.n / max) * (H - T - B);
+    const x = L + i * bw + bw * 0.22;
+    out += '<rect x="' + x.toFixed(1) + '" y="' + (H - B - h).toFixed(1) + '" width="' + (bw * 0.56).toFixed(1) + '" height="' + Math.max(0, h).toFixed(1) + '" rx="1.5" fill="' + (p.n ? 'rgba(242,181,68,.72)' : 'rgba(255,255,255,.05)') + '"/>';
+    if (i % 3 === 0) out += '<text x="' + (x + bw * 0.28).toFixed(1) + '" y="' + (H - 12) + '" fill="#5c6b80" font-size="9.5" font-family="ui-monospace,monospace" text-anchor="middle">' + p.hour + '</text>';
+  });
+  svg.innerHTML = out;
+  $('#events-total').textContent = fmt(DATA.monitor.last24);
+}
+
+function renderEvents() {
+  const body = $('#event-rows');
+  body.replaceChildren();
+  for (const e of DATA.monitor.events) {
+    const tr = el('tr');
+    tr.innerHTML = '<td class="c-status"><span class="tag ' + (OPCLASS[e.op] ?? 'sleep') + '">' + (OPLABEL[e.op] ?? e.op) + '</span></td>'
+      + '<td class="td-time c-time">' + new Date(e.ts).toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) + '</td>'
+      + '<td class="td-type c-type">' + (e.id ? '#' + e.id : '无对象') + '</td>'
+      + '<td><span class="mem-text">' + esc(e.clip) + '</span></td>'
+      + '<td class="td-type c-src">' + (e.kind ? (KIND_EN[e.kind] ?? e.kind).toUpperCase() : '') + '</td>'
+      + '<td class="c-act"><button class="row-act" type="button">定位</button></td>';
+    tr.addEventListener('click', () => {
+      const target = DATA.items.find(i => i.id === e.id);
+      if (target) openDetail(target); else toast('这条事件对应的记忆不在当前快照里');
+    });
+    body.appendChild(tr);
+  }
+  $('#fail-meta').textContent = '24 小时 ' + DATA.monitor.failures24 + ' 条 · 显示最近 ' + DATA.monitor.failures.length + ' 条';
+  const list = $('#failure-list');
+  list.replaceChildren();
+  if (!DATA.monitor.failures.length) {
+    const d = el('div'); d.style.cssText = 'font-size:.78rem;color:var(--faint)'; d.textContent = '最近没有失败记录'; list.appendChild(d);
+  }
+  for (const f of DATA.monitor.failures) {
+    const d = el('div');
+    d.style.cssText = 'border:1px solid rgba(224,96,92,.25);background:rgba(224,96,92,.06);border-radius:10px;padding:10px 12px;font-size:.74rem;line-height:1.6;overflow-wrap:anywhere';
+    d.innerHTML = '<div style="color:var(--red);font-family:var(--mono);letter-spacing:.08em">' + esc(f.op) + '</div>'
+      + '<div style="color:var(--faint);font-family:var(--mono);margin-top:4px">' + new Date(f.ts).toLocaleString('zh-CN', { hour12: false }) + (f.session ? ' · ' + esc(f.session) : '') + (f.attempts ? ' · ' + f.attempts + ' 次' : '') + '</div>';
+    list.appendChild(d);
+  }
+}
+
+function renderTrend() {
+  const svg = $('#trend');
+  const W = 720, H = 300, L = 44, R = 18, T = 26, B = 40;
+  const s = DATA.series;
+  const max = Math.max(1, ...s.map(p => p.n));
+  const stepX = (W - L - R) / Math.max(1, s.length - 1);
+  const px = i => L + i * stepX;
+  const py = n => H - B - (n / max) * (H - T - B);
+  let line = '', area = '';
+  s.forEach((p, i) => { const cmd = (i ? 'L' : 'M') + px(i).toFixed(1) + ' ' + py(p.n).toFixed(1); line += cmd + ' '; area += cmd + ' '; });
+  area += 'L' + px(s.length - 1).toFixed(1) + ' ' + (H - B) + ' L' + px(0).toFixed(1) + ' ' + (H - B) + ' Z';
+  let grid = '';
+  for (let g = 0; g <= 3; g++) {
+    const y = T + (g / 3) * (H - T - B);
+    const value = Math.round(max * (1 - g / 3));
+    grid += '<line x1="' + L + '" y1="' + y.toFixed(1) + '" x2="' + (W - R) + '" y2="' + y.toFixed(1) + '" stroke="rgba(255,255,255,.045)" stroke-dasharray="2 4"/>';
+    grid += '<text x="' + (L - 10) + '" y="' + (y + 3).toFixed(1) + '" fill="#5c6b80" font-size="9.5" font-family="ui-monospace,monospace" text-anchor="end">' + value + '</text>';
+  }
+  const peak = s.reduce((b, p, i) => (p.n > s[b].n ? i : b), 0);
+  const labels = s.map((p, i) => (i % 2 === 0 ? '<text x="' + px(i).toFixed(1) + '" y="' + (H - 12) + '" fill="#5c6b80" font-size="9.5" font-family="ui-monospace,monospace" text-anchor="middle">' + p.day + '</text>' : '')).join('');
+  const dots = s.map((p, i) => '<circle cx="' + px(i).toFixed(1) + '" cy="' + py(p.n).toFixed(1) + '" r="' + (i === peak ? 3.4 : 2) + '" fill="' + (i === peak ? '#f2b544' : 'rgba(242,181,68,.65)') + '"/>').join('');
+  const callout = '<text x="' + px(peak).toFixed(1) + '" y="' + (py(s[peak].n) - 14).toFixed(1) + '" fill="#8fa0b5" font-size="10" font-family="ui-monospace,monospace" text-anchor="middle">' + s[peak].n + ' 条 · ' + s[peak].day + '</text>';
+  const guide = '<line x1="' + px(peak).toFixed(1) + '" y1="' + (py(s[peak].n) + 6).toFixed(1) + '" x2="' + px(peak).toFixed(1) + '" y2="' + (H - B) + '" stroke="rgba(242,181,68,.22)" stroke-dasharray="2 4"/>';
+  svg.innerHTML = '<defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0" stop-color="rgba(242,181,68,.34)"/><stop offset="1" stop-color="rgba(242,181,68,0)"/></linearGradient></defs>'
+    + grid + '<path class="chart-area" d="' + area + '" fill="url(#ga)"/>'
+    + '<path class="chart-line" d="' + line + '" fill="none" stroke="#f2b544" stroke-width="1.7" stroke-linejoin="round"/>'
+    + guide + dots + labels + callout;
+  $('#trend-total').textContent = fmt(DATA.total);
+}
+
+function renderDonut() {
+  const svg = $('#donut');
+  const order = ['preference', 'fact', 'procedure', 'episode', 'todo']
+    .sort((a, b) => (DATA.counts[b] ?? 0) - (DATA.counts[a] ?? 0));
+  const color = { fact: '#e8a13a', procedure: '#6aa5e8', preference: '#c9a7e0', episode: '#5c6b80', todo: '#3fbf8f' };
+  const total = order.reduce((n, k) => n + (DATA.counts[k] ?? 0), 0) || 1;
+  const cx = 75, cy = 75, r = 54, w = 13;
+  const C = 2 * Math.PI * r;
+  let off = 0, out = '<circle cx="75" cy="75" r="' + r + '" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="' + w + '"/>';
+  for (const k of order) {
+    const n = DATA.counts[k] ?? 0;
+    if (!n) continue;
+    const len = (n / total) * C;
+    out += '<circle cx="75" cy="75" r="' + r + '" fill="none" stroke="' + color[k] + '" stroke-width="' + w + '"'
+      + ' stroke-dasharray="' + Math.max(0, len - 2).toFixed(1) + ' ' + (C - len + 2).toFixed(1) + '"'
+      + ' stroke-dashoffset="' + (-off).toFixed(1) + '" transform="rotate(-90 75 75)"/>';
+    off += len;
+  }
+  out += '<text x="75" y="72" fill="#e8edf4" font-size="19" font-family="ui-monospace,monospace" text-anchor="middle">5 类</text>';
+  out += '<text x="75" y="88" fill="#5c6b80" font-size="8.5" font-family="ui-monospace,monospace" letter-spacing="2" text-anchor="middle">KINDS</text>';
+  svg.innerHTML = out;
+  const list = $('#donut-list');
+  list.replaceChildren();
+  for (const k of order) {
+    const n = DATA.counts[k] ?? 0;
+    const d = el('div', 'drow');
+    d.innerHTML = '<span class="sw" style="background:' + color[k] + '"></span>'
+      + '<span class="dn">' + (KIND[k] ?? k) + '<em>' + (KIND_EN[k] ?? k) + '</em></span>'
+      + '<span class="dv">' + fmt(n) + '</span>'
+      + '<span class="dp">' + Math.round((n / total) * 100) + '%</span>';
+    list.appendChild(d);
+  }
+}
+
+function bars(target, rows) {
+  const host = $(target);
+  host.replaceChildren();
+  const max = Math.max(1, ...rows.map(r => r.n));
+  for (const r of rows) {
+    const d = el('div', 'drow');
+    d.innerHTML = '<span class="dn">' + esc(r.label) + '</span>'
+      + '<span class="hit-bar" style="width:96px"><i style="width:' + ((r.n / max) * 100).toFixed(1) + '%"></i></span>'
+      + '<span class="dv" style="width:52px;text-align:right">' + fmt(r.n) + '</span>';
+    host.appendChild(d);
+  }
+}
+
+function renderDormant() {
+  const q = DATA.dormantQueue;
+  $('#b-dorm').textContent = fmt(q.total);
+  countUp(document.querySelector('[data-count="dormantCount"]'), q.total);
+  countUp(document.querySelector('[data-count="pinnedCount"]'), DATA.pinned);
+  const last = DATA.audit.rows.find(r => r.op === 'sleep_pass');
+  if (last) $('#sweep-time').textContent = new Date(last.ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const body = $('#dormant-rows');
+  body.replaceChildren();
+  for (const item of q.items) {
+    const tr = el('tr');
+    tr.innerHTML = '<td class="c-status"><span class="tag sleep">休眠</span></td>'
+      + '<td class="td-time c-time">' + day(item.date) + '</td>'
+      + '<td class="td-type c-type">' + (KIND_EN[item.kind] ?? item.kind).toUpperCase() + '</td>'
+      + '<td><span class="mem-text">' + esc(item.content) + '</span></td>'
+      + '<td class="td-hit c-src">' + (item.hit ?? 0) + '</td>'
+      + '<td class="c-act"><button class="row-act" type="button">唤醒</button></td>';
+    body.appendChild(tr);
+  }
+  if (!q.items.length) {
+    const tr = el('tr', 'empty-row');
+    tr.innerHTML = '<td colspan="6">当前没有休眠记忆。长期未召回且未置顶的条目才会转入这里，可随时唤醒。</td>';
+    body.appendChild(tr);
+  }
+}
+
+let auditFilter = 'all';
+const FAIL_OP = /failed|error/i;
+function renderAudit() {
+  const rows = DATA.audit.rows;
+  $('#b-audit').textContent = fmt(rows.length);
+  countUp(document.querySelector('[data-count="auditRows"]'), rows.length);
+  countUp(document.querySelector('[data-count="auditOps"]'), DATA.audit.ops.length);
+  $('#audit-fail').textContent = fmt(rows.filter(r => FAIL_OP.test(r.op)).length);
+  $('#audit-write').textContent = fmt(rows.filter(r => /remember|correct|forget|ingest/.test(r.op)).length);
+  $('#audit-job').textContent = fmt(rows.filter(r => /job|lease|dispatch|settle/.test(r.op)).length);
+  const chips = $('#audit-chips');
+  if (!chips.childElementCount) {
+    for (const [op, n] of [['all', rows.length]].concat(DATA.audit.ops.slice(0, 9))) {
+      const b = el('button', 'chip' + (op === 'all' ? ' on' : ''), op === 'all' ? '全部 ' + fmt(n) : op + ' ' + fmt(n));
+      b.dataset.op = op;
+      b.style.letterSpacing = '0';
+      b.addEventListener('click', () => {
+        auditFilter = op;
+        chips.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x.dataset.op === op));
+        renderAudit();
+      });
+      chips.appendChild(b);
+    }
+  }
+  const list = auditFilter === 'all' ? rows : rows.filter(r => r.op === auditFilter);
+  $('#audit-count').textContent = fmt(list.length) + ' 条';
+  const body = $('#audit-rows');
+  body.replaceChildren();
+  for (const row of list.slice(0, 120)) {
+    const bad = FAIL_OP.test(row.op);
+    const tr = el('tr');
+    tr.innerHTML = '<td class="c-status"><span class="tag ' + (bad ? 'conflict' : 'active') + '">' + (bad ? '失败' : '正常') + '</span></td>'
+      + '<td class="td-time c-time">' + new Date(row.ts).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + '</td>'
+      + '<td class="td-type a-op" style="letter-spacing:.02em;text-transform:none" title="' + esc(row.op) + '">' + esc(row.op) + '</td>'
+      + '<td class="td-type a-by" style="letter-spacing:.04em">' + esc(row.by) + '</td>'
+      + '<td><span class="mem-text">' + esc(row.detail) + '</span></td>';
+    body.appendChild(tr);
+  }
+}
+
+function renderProfile() {
+  const p = DATA.profile;
+  $('#p-time').textContent = p.generatedAt ? '生成于 ' + new Date(p.generatedAt).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '未生成';
+  const lag = $('#p-lag');
+  lag.replaceChildren();
+  if (p.lag && p.lag.count > 0) {
+    const chip = el('span', 'tag', '落后 ' + p.lag.count + ' 条写入');
+    chip.style.cssText = 'color:var(--accent);border:1px solid rgba(232,161,58,.4);background:rgba(232,161,58,.08);letter-spacing:.06em';
+    chip.title = '画像生成后又有 ' + p.lag.count + ' 条记忆写入，最新一条在 ' + (p.lag.newestAt ? day(p.lag.newestAt) : '未知');
+    lag.appendChild(chip);
+  }
+  countUp(document.querySelector('[data-count="pId"]'), p.counts.identity);
+  countUp(document.querySelector('[data-count="pPref"]'), p.counts.preferences);
+  countUp(document.querySelector('[data-count="pTodo"]'), p.counts.todos);
+  countUp(document.querySelector('[data-count="pProc"]'), p.counts.procedures);
+  countUp(document.querySelector('[data-count="pEp"]'), p.counts.episodes);
+
+  const body = $('#profile-body');
+  body.replaceChildren();
+  for (const block of p.blocks) {
+    if (block.type === 'h') {
+      const h = el('div', null, block.text);
+      h.style.cssText = 'font-family:var(--serif);font-size:1rem;letter-spacing:.12em;color:var(--accent);margin-top:6px';
+      body.appendChild(h);
+    } else if (block.type === 'li') {
+      const li = el('div');
+      li.style.cssText = 'display:flex;gap:9px;font-size:.79rem;color:var(--dim);line-height:1.75';
+      li.innerHTML = '<span style="color:var(--faint);font-family:var(--mono)">·</span><span>' + esc(block.text) + '</span>';
+      body.appendChild(li);
+    } else {
+      const d = el('div', null, block.text);
+      d.style.cssText = 'font-size:.8rem;color:var(--ink);line-height:1.8';
+      body.appendChild(d);
+    }
+  }
+
+  const kw = $('#p-keywords');
+  kw.replaceChildren();
+  for (const word of p.keywords) {
+    const chip = el('span', 'tag active', word);
+    chip.style.fontSize = '.64rem';
+    kw.appendChild(chip);
+  }
+
+  const samples = $('#p-samples');
+  samples.replaceChildren();
+  for (const [label, list] of [['身份', p.samples.identity], ['偏好', p.samples.preferences], ['待办', p.samples.todos]]) {
+    for (const item of list.slice(0, 2)) {
+      const row = el('div', 'drow');
+      row.style.cursor = 'pointer';
+      row.innerHTML = '<span class="tag sleep">' + label + '</span><span class="dn">' + esc(item.content) + '</span><span class="dv">#' + item.id + '</span>';
+      row.addEventListener('click', () => {
+        const target = DATA.items.find(i => i.id === item.id);
+        if (target) openDetail(target); else toast('这条不在当前快照里');
+      });
+      samples.appendChild(row);
+    }
+  }
+}
+
+function renderConflicts() {
+  const host = $('#pairs');
+  host.replaceChildren();
+  for (const pair of DATA.conflicts.pairs) {
+    const card = el('div', 'conflict-card');
+    card.dataset.pair = pair.old.id + '/' + pair.new.id;
+    const basis = pair.basis === 'ref'
+      ? '<span class="tag sleep">新条引用了旧条编号</span>'
+      : '<span class="tag sleep">仅语义相近</span>';
+    const simLine = pair.sim == null ? '' : '<span style="font-family:var(--mono);letter-spacing:.12em">相似度 ' + pair.sim.toFixed(3) + '</span>'
+      + '<span class="hit-bar" style="width:120px"><i style="width:' + Math.round(pair.sim * 100) + '%"></i></span>'
+      + (pair.suggestion ? '<span class="tag sleep" style="margin-left:6px">建议 ' + ({ annotate: '批注取代', 'supersede-review': '复核是否取代' }[pair.suggestion] ?? pair.suggestion) + '</span>' : '');
+    card.innerHTML = '<div class="cc-head"><div class="cc-title">同一主题的两种说法<span class="meta">候选对 ' + pair.old.id + ' / ' + pair.new.id + '</span></div>'
+      + '<span class="tag conflict">冲突待裁</span></div>'
+      + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:.74rem;color:var(--faint);flex-wrap:wrap">'
+      + basis + simLine + '</div>'
+      + '<div class="cc-versions">'
+      + '<div class="cc-ver" data-id="' + pair.old.id + '"><div class="vh"><span class="tag sleep">旧 #' + pair.old.id + '</span><span class="td-time">' + pair.old.updated_at + '</span><span class="open-hint">查看全文</span></div><p>' + esc(pair.old.snippet) + '</p></div>'
+      + '<div class="cc-ver" data-id="' + pair.new.id + '"><div class="vh"><span class="tag active">新 #' + pair.new.id + '</span><span class="td-time">' + pair.new.updated_at + '</span><span class="open-hint">查看全文</span></div><p>' + esc(pair.new.snippet) + '</p></div>'
+      + '</div>'
+      + '<div class="cc-acts"><button class="btn-mini" data-act-adopt>采纳新说法</button>'
+      + '<button class="btn-mini" data-act-keep style="color:var(--dim);border-color:var(--line);background:none">保留旧说法</button>'
+      + '<button class="btn-mini" data-act-none style="color:var(--faint);border-color:var(--line);background:none">两条都无关</button></div>';
+    card.querySelectorAll('.cc-ver').forEach(box => box.addEventListener('click', () => {
+      const item = DATA.items.find(i => i.id === Number(box.dataset.id));
+      if (!item) return toast('这条记忆不在当前快照里');
+      openDetail(item, { pair: card.dataset.pair, side: Number(box.dataset.id) === pair.old.id ? 'old' : 'new' });
+    }));
+    if (LIVE) {
+      const acts = card.querySelector('.cc-acts');
+      acts.replaceChildren();
+      const go = el('button', 'btn-mini', '点卡片看全文后处理');
+      go.addEventListener('click', () => {
+        const item = DATA.items.find(i => i.id === pair.new.id);
+        if (item) openDetail(item); else toast('这条不在当前快照里');
+      });
+      acts.appendChild(go);
+    }
+    for (const [selector, text] of (LIVE ? [] : [['[data-act-adopt]', '原型模式：采纳新说法，旧条转为历史'],
+      ['[data-act-keep]', '原型模式：保留旧说法，新条标记待批注'],
+      ['[data-act-none]', '已标记为无关：这对不会再出现在待裁决里']])) {
+      card.querySelector(selector).addEventListener('click', () => {
+        card.classList.add('done');
+        toast(text);
+      });
+    }
+    host.appendChild(card);
+  }
+  if (!DATA.conflicts.pairs.length) {
+    const empty = el('div', 'card');
+    empty.textContent = '当前没有待复核的冲突';
+    host.appendChild(empty);
+  }
+}
+
+function renderNeighbourhood() {
+  const svg = $('#neighbourhood');
+  if (!DATA.hub) { svg.innerHTML = ''; return; }
+  const H = 360, cx = 250, cy = 205, R = 112;
+  const n = DATA.hub.neighbours.length;
+  const color = { fact: '#e8a13a', procedure: '#6aa5e8', preference: '#c9a7e0', episode: '#5c6b80', todo: '#3fbf8f' };
+  let out = '';
+  DATA.hub.neighbours.forEach((nb, i) => {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
+    out += '<line x1="' + cx + '" y1="' + cy + '" x2="' + x.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="rgba(255,255,255,.09)"/>';
+    out += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (nb.rel === 'ref' ? 4.2 : 3) + '" fill="' + (color[nb.kind] ?? '#5c6b80') + '" opacity=".9"/>';
+    out += '<text x="' + (x + Math.cos(a) * 14).toFixed(1) + '" y="' + (y + Math.sin(a) * 14 + 3).toFixed(1) + '" fill="#5c6b80" font-size="9" font-family="ui-monospace,monospace" text-anchor="middle">#' + nb.id + '</text>';
+  });
+  out += '<circle cx="250" cy="205" r="13" fill="#f2b544"/>';
+  out += '<text x="18" y="26" fill="#e8edf4" font-size="12" font-family="ui-monospace,monospace">#' + DATA.hub.id + ' · ' + (KIND[DATA.hub.kind] ?? DATA.hub.kind) + '</text>';
+  out += '<text x="18" y="46" fill="#8fa0b5" font-size="10.5">' + esc(DATA.hub.head) + '</text>';
+  svg.innerHTML = out;
+  const legend = $('#hub-legend');
+  legend.replaceChildren();
+  const counts = {};
+  for (const nb of DATA.hub.neighbours) counts[nb.rel] = (counts[nb.rel] ?? 0) + 1;
+  for (const [rel, label] of [['co_tag', '共标签'], ['similar', '向量相似'], ['ref', '显式引用']]) {
+    if (!counts[rel]) continue;
+    const d = el('div', 'li');
+    d.innerHTML = '<span class="sw" style="background:var(--accent-strong)"></span>' + label + ' ' + counts[rel];
+    legend.appendChild(d);
+  }
+}
+
+function renderGraph() {
+  renderNeighbourhood();
+  bars('#rel-bars', [{ label: '共标签', n: DATA.byRel.co_tag ?? 0 }, { label: '向量相似', n: DATA.byRel.similar ?? 0 }, { label: '显式引用', n: DATA.byRel.ref ?? 0 }]);
+  bars('#degree-bars', DATA.topNodes.map(n => ({ label: '#' + n.id + ' ' + (KIND[n.kind] ?? ''), n: n.n })));
+}
+
+function renderSignals() {
+  bars('#tag-bars', DATA.topTags.map(([tag, n]) => ({ label: tag, n })));
+}
+
+const ACTIONS = { copy: '已复制记忆内容', pin: '已切换置顶', correct: '已生成新版本', forget: '已删除（逻辑删除，可审计）' };
+
+async function api(path, body) {
+  const response = await fetch(path, body === undefined ? { cache: 'no-store' }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error ?? data?.msg ?? 'HTTP ' + response.status);
+  return data;
+}
+
+function reload() { return loadLive().then(boot).catch(e => toast('刷新失败：' + e.message)); }
+
+async function loadLive() {
+  const [mem, conf, dorm, graph, prof, events, audit] = await Promise.all([
+    api('/api/memories'), api('/api/conflicts'), api('/api/dormant'), api('/api/graph'),
+    api('/api/profile'), api('/api/events'), api('/api/audit'),
+  ]);
+  const items = (mem.items ?? []).map(item => {
+    const tags = String(item.tags ?? '');
+    const source = tags.includes('auto') ? 'auto' : tags.includes('summary') ? 'summary'
+      : tags.includes('lifeos') ? 'lifeos' : tags.includes('session') ? 'session' : 'manual';
+    const date = item.date ?? item.updated_at ?? new Date().toISOString();
+    return {
+      id: item.id, kind: item.kind, content: String(item.content), tags, date,
+      time: new Date(date).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+      pinned: item.pinned ? 1 : 0, version: item.version ?? 1, hit: item.hit_count ?? 0,
+      status: 'active', source,
+    };
+  });
+  const conflictIds = new Set((conf.pairs ?? []).flatMap(p => [p.old.id, p.new.id]));
+  for (const item of items) item.status = conflictIds.has(item.id) ? 'conflict' : item.pinned ? 'pin' : 'active';
+  const counts = mem.counts ?? {};
+  const pairs = (conf.pairs ?? []).map(p => {
+    const newer = items.find(i => i.id === p.new.id)?.content ?? '';
+    return {
+      old: { id: p.old.id, kind: p.old.kind, updated_at: p.old.updated_at, snippet: p.old.snippet },
+      new: { id: p.new.id, kind: p.new.kind, updated_at: p.new.updated_at, snippet: p.new.snippet },
+      basis: new RegExp('(?:id\\s*=\\s*|#)' + p.old.id + '(?![0-9])').test(newer) ? 'ref' : 'similar',
+      sim: typeof p.sim === 'number' ? p.sim : null,
+      suggestion: p.suggestion ?? null,
+    };
+  });
+  const days = [...new Set(items.map(i => day(i.date)))].sort();
+  const series = days.slice(-14).map(d => ({ day: d.slice(5), n: items.filter(i => day(i.date) === d).length }));
+  const tagCount = {};
+  for (const item of items) for (const raw of String(item.tags || '').split(',')) {
+    const key = raw.trim().split(':')[0];
+    if (key) tagCount[key] = (tagCount[key] ?? 0) + 1;
+  }
+  const degree = new Map();
+  for (const link of graph.links ?? []) {
+    degree.set(link.source, (degree.get(link.source) ?? 0) + 1);
+    degree.set(link.target, (degree.get(link.target) ?? 0) + 1);
+  }
+  const byId = new Map(items.map(i => [i.id, i]));
+  const topNodes = [...degree.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+    .map(([id, n]) => ({ id, n, kind: byId.get(id)?.kind ?? '-', head: String(byId.get(id)?.content ?? '').slice(0, 44) }));
+  const hub = topNodes[0]?.id;
+  const seen = new Set();
+  const neighbours = (graph.links ?? []).filter(l => l.source === hub || l.target === hub)
+    .map(l => { const other = l.source === hub ? l.target : l.source; return { id: other, kind: byId.get(other)?.kind ?? '-', rel: l.rel, weight: l.weight ?? 1 }; })
+    .filter(nb => (seen.has(nb.id) ? false : (seen.add(nb.id), true)))
+    .sort((a, b) => (b.rel === 'ref') - (a.rel === 'ref') || b.weight - a.weight)
+    .slice(0, 24);
+  const sessions = new Set(items.flatMap(i => String(i.tags).split(',').map(t => t.trim()).filter(t => t.startsWith('session:')).map(t => t.slice(8))));
+  const recent7 = items.filter(i => new Date(i.date) >= new Date(Date.now() - 7 * 864e5)).length;
+  const prev7 = items.filter(i => { const t = new Date(i.date); return t >= new Date(Date.now() - 14 * 864e5) && t < new Date(Date.now() - 7 * 864e5); }).length;
+
+  const profileText = String(prof.cached?.summary ?? '');
+  const kwMatch = profileText.match(/关键词[:：]\s*(.+)$/m);
+  const blocks = [];
+  for (const para of profileText.split(/\n{2,}/)) {
+    const lines = para.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const head = lines[0].match(/^\*\*(.+?)\*\*$/);
+    if (head) blocks.push({ type: 'h', text: head[1] });
+    else if (!lines.some(l => l.startsWith('- '))) blocks.push({ type: 'p', text: lines.join(' ').replace(/\*\*/g, '') });
+    for (const line of lines) if (line.startsWith('- ')) blocks.push({ type: 'li', text: line.slice(2).replace(/\*\*/g, '') });
+  }
+  if (blocks[0]?.type === 'h' && blocks[0].text === '用户画像') blocks.shift();
+  const genAt = prof.cached?.generated_at ? new Date(prof.cached.generated_at).getTime() : 0;
+  const pick = (list, n) => (Array.isArray(list) ? list.slice(0, n).map(x => ({ id: x.id, content: String(x.content).slice(0, 220) })) : []);
+  const newest = items.length ? items.reduce((a, b) => (new Date(a.date) > new Date(b.date) ? a : b)).date : null;
+
+  DATA = {
+    generated: new Date().toISOString(),
+    version: events.version ?? '',
+    total: mem.total ?? items.length,
+    counts,
+    pinned: items.filter(i => i.pinned).length,
+    dormant: dorm.total ?? 0,
+    dormantQueue: dorm,
+    sessions: sessions.size,
+    series,
+    topTags: Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 8),
+    topNodes,
+    hub: hub ? { id: hub, kind: byId.get(hub)?.kind ?? '-', head: String(byId.get(hub)?.content ?? '').slice(0, 54), neighbours } : null,
+    byRel: graph.byRel ?? {},
+    engine: { port: location.port || '7640', db: events.db ?? '', pid: events.pid ?? null },
+    deltas: { last7: recent7, prev7, pct: prev7 ? Math.round(((recent7 - prev7) / prev7) * 100) : 0 },
+    profile: {
+      generatedAt: prof.cached?.generated_at ?? null, blocks,
+      keywords: kwMatch ? kwMatch[1].split(/[、,，]/).map(k => k.trim()).filter(Boolean) : [],
+      counts: { identity: prof.identity?.length ?? 0, preferences: prof.preferences?.length ?? 0, todos: prof.todos?.length ?? 0, procedures: prof.procedures?.length ?? 0, episodes: prof.episodes?.length ?? 0 },
+      samples: { identity: pick(prof.identity, 5), preferences: pick(prof.preferences, 5), todos: pick(prof.todos, 5) },
+      lag: genAt ? { count: items.filter(i => new Date(i.date).getTime() > genAt).length, newestAt: newest, days: Math.floor((Date.now() - genAt) / 864e5) } : { count: 0 },
+    },
+    monitor: {
+      hours: events.hours ?? [], events: events.events ?? [], failures: events.failures ?? [],
+      last24: events.last24 ?? 0, writes24: events.writes24 ?? 0, corrections24: events.corrections24 ?? 0, failures24: events.failures24 ?? 0,
+    },
+    audit: { rows: audit.rows ?? [], ops: audit.ops ?? [] },
+    conflicts: { total: conf.total ?? pairs.length, pairs },
+    items,
+  };
+}
+
+let conflictCtx = null;
+function openDetail(item, ctx) {
+  current = item;
+  conflictCtx = ctx ?? null;
+  $('#m-adopt').hidden = !conflictCtx;
+  $('#m-keep').hidden = !conflictCtx;
+  $('#m-title').textContent = (KIND[item.kind] ?? item.kind) + ' 记忆';
+  $('#m-id').textContent = '#' + item.id;
+  $('#m-kind').textContent = (KIND_EN[item.kind] ?? item.kind).toUpperCase();
+  $('#m-date').textContent = day(item.date) + ' ' + item.time;
+  $('#m-ver').textContent = 'v' + item.version;
+  $('#m-hit').textContent = '命中 ' + item.hit + ' · 来源 ' + (SOURCE[item.source] ?? item.source);
+  $('#m-body').textContent = item.content;
+  $('#m-tags').textContent = item.tags;
+  const box = $('#m-source');
+  box.replaceChildren();
+  if (item.provenance) {
+    const p = item.provenance;
+    const head = el('div');
+    head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:8px';
+    head.innerHTML = '<span style="font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;color:var(--faint)">来源回查 · ' + p.total + ' 条原文'
+      + (item.corroborations ? ' · ' + item.corroborations + ' 条独立佐证' : '') + '</span>'
+      + '<span class="td-time">' + (p.session ? p.session.slice(8, 20) : '') + '</span>';
+    box.appendChild(head);
+    for (const q of p.quotes) {
+      const d = el('div');
+      d.style.cssText = 'border-left:2px solid rgba(242,181,68,.35);padding:2px 0 2px 10px;margin-bottom:8px;font-size:.78rem;color:var(--dim);line-height:1.7';
+      d.textContent = q.text;
+      box.appendChild(d);
+    }
+    const note = el('div');
+    note.style.cssText = 'font-size:.68rem;color:var(--faint)';
+    note.textContent = '原文已脱敏截断，完整内容用 memory_source 回查';
+    box.appendChild(note);
+  } else {
+    const d = el('div');
+    d.style.cssText = 'font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;color:var(--faint)';
+    d.textContent = '来源回查 · 此条没有可回查的原文证据';
+    box.appendChild(d);
+  }
+  $('#modal').classList.add('on');
+}
+function closeDetail() { $('#modal').classList.remove('on'); current = null; conflictCtx = null; }
+
+function resolveConflict(adoptCurrent) {
+  if (!conflictCtx) return;
+  const card = document.querySelector('.conflict-card[data-pair="' + conflictCtx.pair + '"]');
+  if (card) card.classList.add('done');
+  toast(adoptCurrent
+    ? '原型模式：这里会把 #' + (current?.id ?? '?') + ' 采纳为现行说法，另一版转为历史'
+    : '原型模式：这里会保留另一版，本条标记为待批注');
+  closeDetail();
+}
+
+const TITLES = { profile: '用户画像', overview: '总览', events: '事件流', all: '全部条目', pinned: '置顶', dormant: '休眠队列', audit: '审计日志', conflicts: '冲突裁决', graph: '关联图谱', signals: '标签来源' };
+function setView(next) {
+  const valid = TITLES[next] ? next : 'overview';
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + valid));
+  document.querySelectorAll('.item').forEach(i => i.classList.toggle('on', i.dataset.go === valid));
+  $('#page-title').textContent = TITLES[valid];
+  if (valid === 'all') renderAll();
+  if (valid === 'pinned') renderPinned();
+  if (valid === 'dormant') renderDormant();
+  if (valid === 'audit') renderAudit();
+  if (valid === 'profile') renderProfile();
+}
+
+document.querySelectorAll('[data-go]').forEach(n => n.addEventListener('click', () => { location.hash = n.dataset.go; }));
+
+for (const c of [{ k: 'all', l: '全部' }].concat(['fact', 'procedure', 'preference', 'episode', 'todo'].map(k => ({ k, l: KIND[k] })))) {
+  const b = el('button', 'chip' + (c.k === 'all' ? ' on' : ''), c.l);
+  b.dataset.kind = c.k;
+  b.addEventListener('click', () => {
+    kind = c.k;
+    document.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x.dataset.kind === kind));
+    renderAll();
+    if (location.hash !== '#all') location.hash = 'all';
+  });
+  $('#kind-chips').appendChild(b);
+}
+
+$('#q').addEventListener('input', e => { query = e.target.value.trim().toLowerCase(); renderAll(); renderPinned(); });
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#q').focus(); $('#q').select(); }
+  if (e.key === 'Escape') closeDetail();
+});
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeDetail(); });
+document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', async () => {
+  const act = b.dataset.act;
+  if (act === 'close') return closeDetail();
+  if (LIVE && current && (act === 'pin' || act === 'forget' || act === 'correct')) {
+    try {
+      if (act === 'pin') {
+        await api('/api/lifecycle', { id: current.id, action: current.pinned ? 'unpin' : 'pin' });
+        toast(current.pinned ? '已取消置顶' : '已置顶');
+      } else if (act === 'forget') {
+        if (!confirm('逻辑删除 #' + current.id + '？删除后默认召回不再返回，可审计。')) return;
+        await api('/api/forget', { id: current.id });
+        toast(ACTIONS.forget);
+      } else {
+        const text = prompt('修正 #' + current.id + ' 的内容（生成新版本）：', current.content);
+        if (!text || text === current.content) return;
+        const r = await api('/api/correct', { id: current.id, content: text, expected_version: current.version });
+        if (!r.ok) { toast(r.msg ?? '修正失败'); return; }
+        toast(ACTIONS.correct);
+      }
+      closeDetail();
+      return reload();
+    } catch (e) { toast('操作失败：' + e.message); return; }
+  }
+  if (act === 'copy' && current) {
+    try { await navigator.clipboard.writeText(current.content); toast(ACTIONS.copy); }
+    catch { toast('浏览器拒绝了剪贴板权限'); }
+    return;
+  }
+  toast(ACTIONS[act] ?? '原型模式');
+}));
+window.addEventListener('hashchange', () => setView(location.hash.slice(1)));
+
+$('#m-adopt').addEventListener('click', () => resolveConflict(true));
+$('#m-keep').addEventListener('click', () => resolveConflict(false));
+$('#p-refresh').addEventListener('click', async () => {
+  if (!LIVE) return toast('原型模式：这里会调用模型重新归纳画像，不会覆盖缓存');
+  toast('正在重新归纳画像，可能需要几十秒');
+  try { await api('/api/profile/refresh', {}); await reload(); toast('画像已更新'); }
+  catch (e) { toast('归纳失败：' + e.message); }
+});
+$('#sleep-run').addEventListener('click', async () => {
+  if (!LIVE) return toast('原型模式：这里会触发一次休眠整理，不写库');
+  try { const r = await api('/api/sleep', {}); await reload(); toast(r.msg ?? '休眠整理完成'); }
+  catch (e) { toast('整理失败：' + e.message); }
+});
+$('#engine-info').addEventListener('click', () => {
+  $('#m-title').textContent = '引擎信息';
+  $('#m-id').textContent = 'mcp: lm-memory';
+  $('#m-kind').textContent = 'LOCAL';
+  $('#m-date').textContent = 'v' + DATA.version;
+  $('#m-ver').textContent = '端口 ' + DATA.engine.port;
+  $('#m-hit').textContent = DATA.engine.pid ? 'PID ' + DATA.engine.pid : '';
+  $('#m-body').textContent = ['管理页  http://127.0.0.1:' + DATA.engine.port, '数据库  ' + DATA.engine.db,
+    '模式    旧版全局库（项目记忆未开启）', '快照    ' + new Date(DATA.generated).toLocaleString('zh-CN', { hour12: false })].join('\n');
+  $('#m-tags').textContent = '原型只读，不会启动或停止任何进程';
+  current = null;
+  $('#modal').classList.add('on');
+});
+$('#copy-db').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(DATA.engine.db); toast('已复制数据库路径'); }
+  catch { toast('浏览器拒绝了剪贴板权限'); }
+});
+
+function clock() {
+  const d = new Date();
+  $('#clock').textContent = d.toLocaleDateString('sv') + ' ' + d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+function boot() {
+  document.body.classList.add('js');
+  if (new URLSearchParams(location.search).get('static') === '1') { document.body.classList.add('static'); document.body.classList.remove('js'); }
+  $('#b-total').textContent = fmt(DATA.total);
+  $('#b-all').textContent = fmt(DATA.total);
+  $('#b-pin').textContent = fmt(DATA.pinned);
+  $('#b-conf').textContent = fmt(DATA.conflicts.total);
+  $('#b-graph').textContent = fmt(Object.values(DATA.byRel).reduce((a, b) => a + b, 0));
+  $('#f-ver').textContent = DATA.version;
+  $('#s-dorm').textContent = fmt(DATA.dormant) + ' 条';
+  $('#s-snap').textContent = new Date(DATA.generated).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const delta = $('#d-recent');
+  delta.textContent = fmt(DATA.deltas.last7) + ' 条 · ' + (DATA.deltas.pct >= 0 ? '↑' : '↓') + Math.abs(DATA.deltas.pct) + '% 较前周';
+  delta.className = 'delta ' + (DATA.deltas.pct >= 0 ? 'up' : '');
+  countUp(document.querySelector('[data-count="total"]'), DATA.total);
+  countUp(document.querySelector('[data-count="pinned"]'), DATA.pinned);
+  countUp(document.querySelector('[data-count="dormant"]'), DATA.dormant);
+  countUp(document.querySelector('[data-count="sessions"]'), DATA.sessions);
+  countUp(document.querySelector('[data-count="conflicts"]'), DATA.conflicts.total);
+  $('#b-events').textContent = fmt(DATA.monitor.last24);
+  $('#sweep').textContent = fmt(DATA.conflicts.total);
+  countUp(document.querySelector('[data-count="last24"]'), DATA.monitor.last24);
+  countUp(document.querySelector('[data-count="writes24"]'), DATA.monitor.writes24);
+  countUp(document.querySelector('[data-count="corrections24"]'), DATA.monitor.corrections24);
+  countUp(document.querySelector('[data-count="failures24"]'), DATA.monitor.failures24);
+  renderHours();
+  renderEvents();
+  renderTrend();
+  renderDonut();
+  renderRecent();
+  renderAll();
+  renderPinned();
+  renderProfile();
+  renderConflicts();
+  renderDormant();
+  renderAudit();
+  renderGraph();
+  renderSignals();
+  clock();
+  setInterval(clock, 1000);
+  setView(location.hash.slice(1));
+  const deepId = Number(new URLSearchParams(location.search).get('open'));
+  const deep = DATA.items.find(i => i.id === deepId);
+  if (deep) openDetail(deep);
+  document.body.dataset.ready = '1';
+  if (new URLSearchParams(location.search).get('check') === '1') {
+    const bad = [...document.querySelectorAll('.card,.kpi,.table-card,.sheet')].filter(n => n.scrollWidth > n.clientWidth + 1).map(n => n.className.split(' ')[0]);
+    let click = '';
+    if (location.hash.slice(1) === 'conflicts') {
+      const box = document.querySelector('.cc-ver');
+      if (box) {
+        box.click();
+        const modal = document.getElementById('modal');
+        const body = document.getElementById('m-body').textContent.length > 10;
+        const adopt = document.getElementById('m-adopt');
+        click = (modal.classList.contains('on') && body ? ' click-ok' : ' click-fail') + (!adopt.hidden ? ' adopt-ok' : ' adopt-missing');
+        if (new URLSearchParams(location.search).get('hold') !== '1') modal.classList.remove('on');
+      } else click = ' click-missing';
+    }
+    document.title = (document.documentElement.scrollWidth > document.documentElement.clientWidth ? 'XOVERFLOW ' : 'OK ') + (bad.length ? bad.join(',') : 'clean') + click;
+  }
+}
+if (!LIVE) boot();
+else loadLive().then(boot).catch(error => {
+  document.body.dataset.ready = 'error';
+  const box = document.querySelector('.content');
+  if (box) box.innerHTML = '<div class="card" style="margin-top:40px"><h3 style="font-family:var(--serif);font-weight:400;font-size:1.02rem;letter-spacing:.1em">读取失败</h3>'
+    + '<p style="margin-top:12px;color:var(--dim);font-size:.82rem">' + String(error.message) + '</p>'
+    + '<p style="margin-top:8px;color:var(--faint);font-size:.74rem">确认 viewer 正在运行，然后刷新页面。</p></div>';
+});
+</script>
+</body>
+</html>

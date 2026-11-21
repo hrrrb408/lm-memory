@@ -604,6 +604,15 @@ let t; $("#q").addEventListener("input", (e) => { clearTimeout(t); t = setTimeou
 load();
 </script></body></html>`;
 
+const CONSOLE_PAGE = (() => {
+  try { return fs.readFileSync(new URL("./console.html", import.meta.url), "utf8"); }
+  catch { return null; }
+})();
+const tailLines = (file, n) => {
+  try { return fs.readFileSync(file, "utf8").trim().split("\n").slice(-n); } catch { return []; }
+};
+const parseLines = (lines) => lines.flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } });
+
 http.createServer(async (req, res) => {
   const json = (d, code = 200) => { res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(d)); };
   try {
@@ -638,9 +647,10 @@ http.createServer(async (req, res) => {
       }
     }
     if (!["127.0.0.1", "localhost", "[::1]", ""].includes(hostName)) { res.writeHead(403, { "Content-Type": "text/plain" }); return res.end("forbidden host"); }
-    if (req.method === "GET" && u.pathname === "/") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      return res.end(PAGE);
+    if (req.method === "GET" && (u.pathname === "/" || u.pathname === "/classic")) {
+      const body = u.pathname === "/classic" || !CONSOLE_PAGE ? PAGE : CONSOLE_PAGE;
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(body);
     }
     // v0.10 版本端点：供插件探测旧版 viewer 并自动升级重启（detached 进程 app 重启杀不掉）
     if (req.method === "GET" && u.pathname === "/api/version") {
@@ -717,6 +727,46 @@ http.createServer(async (req, res) => {
         const r = await call("memory_sleep", {});
         return json({ ok: true, msg: String(r).slice(0, 200) });
       }
+    }
+    if (req.method === "GET" && u.pathname === "/api/events") {
+      const changes = parseLines(tailLines(path.join(MEM_DIR, "changes.jsonl"), 400));
+      const log = parseLines(tailLines(path.join(MEM_DIR, "log.jsonl"), 400));
+      const nowMs = Date.now();
+      const hours = [];
+      for (let i = 23; i >= 0; i--) {
+        const start = new Date(nowMs - i * 3600e3);
+        hours.push({
+          hour: start.toLocaleTimeString("zh-CN", { hour: "2-digit", hour12: false }),
+          n: changes.filter((c) => { const t = new Date(c.ts); return t >= start && t < new Date(start.getTime() + 3600e3); }).length,
+        });
+      }
+      const dayAgo = new Date(nowMs - 864e5);
+      const last24 = changes.filter((c) => new Date(c.ts) >= dayAgo);
+      const failures = log.filter((l) => /failed|error/i.test(String(l.op ?? "")));
+      return json({
+        version: PKG_VERSION, pid: process.pid, db: path.join(MEM_DIR, "memory.db"),
+        hours,
+        events: changes.slice(-40).reverse().map((c) => ({
+          ts: c.ts, op: c.op, id: c.new_id ?? c.id ?? null, kind: c.kind ?? null,
+          clip: String(c.content ?? c.reason ?? (c.total ? c.total + " 组冲突" : "") ?? "").slice(0, 90),
+        })),
+        failures: failures.slice(-6).reverse().map((l) => ({ ts: l.ts, op: l.op, session: String(l.sessionId ?? "").slice(8, 16), attempts: l.attempts ?? null })),
+        last24: last24.length,
+        writes24: last24.filter((c) => ["remember", "episode", "ingest"].includes(c.op)).length,
+        corrections24: last24.filter((c) => c.op === "correct").length,
+        failures24: failures.filter((l) => new Date(l.ts) >= dayAgo).length,
+      });
+    }
+    if (req.method === "GET" && u.pathname === "/api/audit") {
+      const log = parseLines(tailLines(path.join(MEM_DIR, "log.jsonl"), 400));
+      const rows = log.slice(-300).reverse().map((l) => ({
+        ts: l.ts, op: String(l.op ?? ""),
+        by: String(l.by ?? "").replace("mcp:lm-memory", "mcp").replace("extract-helper", "helper"),
+        detail: String(l.reason ?? l.error ?? l.sessionId ?? l.id ?? l.patch ?? "").slice(0, 70),
+      }));
+      const opCount = {};
+      for (const row of rows) opCount[row.op] = (opCount[row.op] ?? 0) + 1;
+      return json({ rows, ops: Object.entries(opCount).sort((a, b) => b[1] - a[1]) });
     }
     json({ error: "not found" }, 404);
   } catch (e) { json({ error: String(e.message) }, 500); }
