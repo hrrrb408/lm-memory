@@ -33,6 +33,12 @@ const clip = (r) => ({
 // 信号词出现在教训叙事里属正常（procedure 教程常引用「已修复」），
 // 因此单凭词命中不判冲突，必须叠加语义相似或显式引用才输出。
 const DONE_RE = /已(解决|上线|修复|卸载|退役|完结|完成|交付|收编|迁移|废弃|弃用|下线|取代)|(?<!已)取代|替代|作废|改用|迁移到|收编进|拍板弃用|不再使用/;
+// 严格取代词：只有「替换/作废」类动作能证明"这条取代那条"。
+// 「已上线/已修复/已完成/已交付」只描述状态，引用处出现它们不构成取代。
+// 真库实证（2026-11-21）：#360 写「变更热流已上线（#262）」是在给 #262 作证，
+// 被 explicit_ref 分支的宽泛完结词误判成"#262 已被取代"；同时 cos=0.796 低于 0.85 阈值，
+// 说明这一对完全由引用规则的词命中撑起来，属于纯误报。
+const SUPERSEDE_RE = /取代|替代|作废|弃用|废弃|下线|不再使用|收编|退役/;
 // 显式指针引用：#339 先例格式「相关：id=319（Agnes 弃用）、id=338（幻影规则）」。
 const refPattern = (id) => new RegExp(`(?:id\\s*=\\s*|#)${id}(?![0-9])`);
 
@@ -85,18 +91,24 @@ export function findConflictPairs(db, { simMin = 0.85, refWindow = 40, maxPairs 
     }
   }
 
-  // 信号 2：取代性引用（引用点 ±refWindow 字符窗口内含取代词才算；不要求相似）
+  // 信号 2：取代性引用（引用点 ±refWindow 字符窗口内含严格取代词才算；不要求相似）
   const vecById = new Map(entries.map((e) => [e.row.id, e.v]));
   for (const e of entries) {
     const text = String(e.row.content || "");
-    for (const m of text.matchAll(/(?:id\s*=\s*|#)(\d+)(?![0-9])/g)) {
+    // 取代词必须落在"这条引用自己"的括注里：从引用末尾到下一条引用之前。
+    // 真库实证（2026-11-21）：#339 的「相关：id=319（Agnes 弃用）、id=320 v3（配图惯例）、
+    // id=338（幻影规则）、id=336（真实截图首例）」用固定 ±40 窗口时，319 的「弃用」会
+    // 同时命中后面每一条 id，凭空造出 336/339、320/339、338/339 三对误报。
+    const refs = [...text.matchAll(/(?:id\s*=\s*|#)(\d+)(?![0-9])/g)];
+    for (let k = 0; k < refs.length; k++) {
+      const m = refs[k];
       const refId = Number(m[1]);
       if (refId === e.row.id) continue;
       const target = byId.get(refId);
       if (!target) continue;
-      const ctxStart = Math.max(0, (m.index ?? 0) - refWindow);
-      const context = text.slice(ctxStart, (m.index ?? 0) + m[0].length + refWindow);
-      if (!DONE_RE.test(context)) continue; // 纯关联引用，不算取代信号
+      const segEnd = Math.min(refs[k + 1]?.index ?? text.length, (m.index ?? 0) + m[0].length + refWindow);
+      const context = text.slice(m.index ?? 0, segEnd);
+      if (!SUPERSEDE_RE.test(context)) continue; // 纯关联、状态描述或他人括注，不算取代信号
       const [lo, hi] = String(target.updated_at) <= String(e.row.updated_at)
         ? [target, e.row]
         : [e.row, target];

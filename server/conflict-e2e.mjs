@@ -119,6 +119,27 @@ new DatabaseSync(path.join(MEM_DIR, "memory.db"))
 const rRel = findConflictPairs(ro, { simMin: 0.72, maxPairs: 100 });
 t("版本发布条互撞不出对", !rRel.pairs.some((p) => [p.old.id, p.new.id].includes(idRelOld) && [p.old.id, p.new.id].includes(idRelNew)), JSON.stringify(rRel.pairs.map((p) => [p.old.id, p.new.id])));
 
+// 5d) 状态词引用不算取代（2026-11-21 真库误报：#360「已上线（#262）」被当成取代）
+const idStatusRef = idOf(await call("memory_remember", { content: `功能盘点：变更热流已上线（id=${idOld2}），会话内可实时感知其他会话写入`, kind: "episode" }));
+setEmb(idStatusRef, [0, 0, 0, 1, 0]);
+new DatabaseSync(path.join(MEM_DIR, "memory.db"))
+  .prepare("UPDATE memories SET updated_at=? WHERE id=?")
+  .run("2026-11-06T00:00:00.000Z", idStatusRef);
+const rStatus = findConflictPairs(ro, { simMin: 0.999, maxPairs: 100 });
+t("状态词引用（已上线）不算取代", !rStatus.pairs.some((p) => [p.old.id, p.new.id].includes(idOld2) && [p.old.id, p.new.id].includes(idStatusRef)), JSON.stringify(rStatus.pairs.map((p) => [p.old.id, p.new.id, p.signals])));
+
+// 5e) 指针列表里的括注不能跨条目命中（2026-11-21 真库：#339 的「相关：id=319（Agnes 弃用）、
+//     id=320 v3（配图惯例）、id=338、id=336」用固定窗口时，319 的「弃用」会命中后面每一条 id）
+const idListed = idOf(await call("memory_remember", { content: "配图惯例记录：官方现成图可直接下载使用", kind: "procedure" }));
+setEmb(idListed, [0, 0, 1, 0, 0]);
+const idList = idOf(await call("memory_remember", { content: `相关：id=${idOld2}（Agnes 弃用）、id=${idListed}（真实截图首例）。`, kind: "episode" }));
+setEmb(idList, [0, 1, 0, 0, 0]);
+new DatabaseSync(path.join(MEM_DIR, "memory.db"))
+  .prepare("UPDATE memories SET updated_at=? WHERE id IN (?, ?)")
+  .run("2026-11-07T00:00:00.000Z", idListed, idList);
+const rList = findConflictPairs(ro, { simMin: 0.999, maxPairs: 100 });
+t("指针列表的他人括注不算取代（listed 不被牵连）", !rList.pairs.some((p) => [p.old.id, p.new.id].includes(idListed) && [p.old.id, p.new.id].includes(idList)), JSON.stringify(rList.pairs.map((p) => [p.old.id, p.new.id])));
+
 // 5c) Level 2 复核纯函数
 const rStrict = findConflictPairs(ro, { simMin: 0.999, maxPairs: 100 });
 t("simMin 拉满仍保留取代性引用对", rStrict.pairs.some((p) => p.signals.includes("explicit_ref")), `total=${rStrict.total}`);
