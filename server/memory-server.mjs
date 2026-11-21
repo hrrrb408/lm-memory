@@ -594,8 +594,10 @@ function commitMemoryTx({ kind, content, tags = "", source = "agent", createdAt,
   try {
     if (source === "auto-extract" && db.prepare("SELECT 1 FROM suppression WHERE hash=?").get(contentHash(c))) { db.exec("ROLLBACK"); return {ok:false, reason:"suppressed"}; }
     if (supersedesId && validityOf(supersedesId)) { db.exec('ROLLBACK'); return { ok: false, reason: 'dated_requires_explicit_update' }; }
-    // Exact text first (indexed), then the same atomic claim in other punctuation or width.
-    const dup = db.prepare("SELECT id FROM memories WHERE status='active' AND content = ?").get(c) ?? sameFact(kind, c);
+    // Exact text first (indexed), then the same atomic claim in other punctuation or
+    // width. Both lookups are kind-scoped: the same sentence stored as a fact and as
+    // a procedure are two different memories (v0.19.4 复审实锤：跨类型被误判 EXISTS).
+    const dup = db.prepare("SELECT id FROM memories WHERE status='active' AND kind=? AND content = ?").get(kind, c) ?? sameFact(kind, c);
     if (dup) {
       const corroborated = recordCorroboration(dup.id, evidence, sessionId, revision);
       db.exec("COMMIT");

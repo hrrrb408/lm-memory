@@ -38,6 +38,9 @@ test('different wording, a different kind, or the same session does not fabricat
   appendFileSync(file, candidate(3, 'viewer port is 7640', 'viewer port is 7640', 'procedure') + '\n');
   appendFileSync(file, candidate(1, 'Viewer port is 7640', 'Viewer port is 7640') + '\n');
   const hits = await f.recall({ query: 'Viewer port 7640', limit: 20 });
+  // fact 归一为 1 条（宽半角并入），procedure 是独立 kind（复审实锤：跨类型不是 EXISTS）
   assert.equal(hits.length, 3);
+  assert.equal(hits.filter(h => h.kind === 'fact').length, 2);
+  assert.equal(hits.filter(h => h.kind === 'procedure').length, 1);
   for (const hit of hits) assert.equal(JSON.parse(await f.call('memory_source', { id: hit.id })).corroborations.length, 0);
 });

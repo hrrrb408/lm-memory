@@ -94,6 +94,9 @@ const saveConflictReview = (oldR, newR, verdict) => {
   } catch {}
 };
 // 带缓存的复核：返回 { total, needAction, pairs:[{...p, verdict}] }；llm 不可用时 verdict 全为 null（未复核）
+//裁决接口的重校验数据源：与列表页同一套规则（不触发模型复核，只取规则候选）
+const conflictCandidatesCurrent = () => findConflictPairs(ro(), { maxPairs: 20 }).pairs;
+
 async function conflictCandidates() {
   const r = findConflictPairs(ro(), { maxPairs: 20 });
   const pairs = r.pairs.map((p) => ({ ...p, verdict: conflictReviewVerdict(p.old, p.new) }));
@@ -102,12 +105,14 @@ async function conflictCandidates() {
     const raw = await llm(buildReviewPrompt(pending));
     const verdicts = parseReview(raw, pending.length);
     if (verdicts) {
-      verdicts.forEach((v, idx) => {
-        const p = pending[idx];
-        if (!p) return;
+      // v.i 是模型答的候选下标（buildReviewPrompt 按 pending 顺序编号），
+      // 必须用 v.i 定位；用遍历下标会在模型漏答时把判定错挂到别的对上。
+      for (const v of verdicts) {
+        const p = pending[v.i];
+        if (!p || p.verdict !== null) continue;
         p.verdict = v.verdict;
         saveConflictReview(p.old, p.new, v.verdict);
-      });
+      }
       // 未拿到判定的残余（模型漏答）保持 null
     }
   }
@@ -612,6 +617,10 @@ const tailLines = (file, n) => {
   try { return fs.readFileSync(file, "utf8").trim().split("\n").slice(-n); } catch { return []; }
 };
 const parseLines = (lines) => lines.flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } });
+// viewer 自己的审计条目（与 memory-server 的 log.jsonl 同一文件、同一形态）
+const auditViewer = (op, data = {}) => {
+  try { fs.appendFileSync(path.join(MEM_DIR, "log.jsonl"), JSON.stringify({ ts: new Date().toISOString(), op, by: "viewer", ...data }) + "\n"); } catch {}
+};
 
 http.createServer(async (req, res) => {
   const json = (d, code = 200) => { res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(d)); };
@@ -724,19 +733,31 @@ http.createServer(async (req, res) => {
         return json({ ok: String(r).includes("OK"), msg: String(r).slice(0, 80) });
       }
       if (u.pathname === "/api/conflict/resolve") {
+        // v0.19.4 复审加固：判定白名单、候选对重校验、乐观并发、写后审计。
+        const VERDICTS = { adopt: "superseded", keep: "related", unrelated: "unrelated" };
+        const verdict = VERDICTS[body.verdict];
+        if (!verdict) return json({ ok: false, msg: "verdict 必须是 adopt / keep / unrelated" }, 400);
         const oldId = Number(body.old), newId = Number(body.new);
-        const oldRow = ro().prepare("SELECT id, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(oldId);
-        const newRow = ro().prepare("SELECT id, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(newId);
-        if (!oldRow || !newRow) return json({ ok: false, msg: "候选对已变化，请刷新后重试" });
-        if (body.verdict === "adopt") {
-          // 旧说法被接棒：逻辑删除旧条（保留审计），并把这对记为 superseded
-          const r = await call("memory_forget", { id: oldId, reason: "conflict-adopt" });
-          saveConflictReview(oldRow, newRow, "superseded");
-          return json({ ok: String(r).includes("OK"), msg: "已采纳新说法，旧条转为历史（可审计）" });
+        if (!Number.isSafeInteger(oldId) || !Number.isSafeInteger(newId) || oldId === newId)
+          return json({ ok: false, msg: "old/new 必须是不同的记忆 id" }, 400);
+        const candidate = conflictCandidatesCurrent().find((p) =>
+          (p.old.id === oldId && p.new.id === newId) || (p.old.id === newId && p.new.id === oldId));
+        if (!candidate) return json({ ok: false, msg: "这对已不在待裁决列表（可能已裁决或库已变化），请刷新" }, 409);
+        const oldRow = ro().prepare("SELECT id, version, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(candidate.old.id);
+        const newRow = ro().prepare("SELECT id, version, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(candidate.new.id);
+        if (!oldRow || !newRow) return json({ ok: false, msg: "候选对已变化，请刷新后重试" }, 409);
+        const expectOld = Number(body.expected_old_version);
+        if (Number.isSafeInteger(expectOld) && expectOld !== oldRow.version)
+          return json({ ok: false, msg: `旧条版本已变化（当前 v${oldRow.version}），请刷新` }, 409);
+        if (verdict === "superseded") {
+          const r = await call("memory_forget", { id: oldRow.id, reason: "conflict-adopt" });
+          if (!String(r).includes("OK")) return json({ ok: false, msg: String(r).slice(0, 80) });
+          saveConflictReview(oldRow, newRow, verdict);
+          auditViewer("conflict_resolve", { old: oldRow.id, new: newRow.id, verdict: "superseded" });
+          return json({ ok: true, msg: "已采纳新说法，旧条转为历史（审计可查；默认召回不再返回）" });
         }
-        // 保留旧说法 / 两条无关：只记录判定，不动任何内容
-        const verdict = body.verdict === "keep" ? "related" : "unrelated";
         saveConflictReview(oldRow, newRow, verdict);
+        auditViewer("conflict_resolve", { old: oldRow.id, new: newRow.id, verdict });
         return json({ ok: true, msg: verdict === "related" ? "已记录：两条都保留" : "已记录：判为无关，不再提示" });
       }
       if (u.pathname === "/api/sleep") {

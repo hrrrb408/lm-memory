@@ -30,6 +30,10 @@
 - `node --test tests/migrate-personal.test.mjs` 验证迁移只带 active 条目、保留事件日期与置顶、重复执行为幂等、源库不被改动。
 - 真实模型：用 `glm-5.3-flash` 对一段真实发布流程对话做提炼，产出 2 条经验 + 1 条会话摘要，经统一提交入口入库后可按「发布流程 暂存验收」「完整回归」召回，日期与来源均在。
 
+## 冲突裁决接口（0.19.4）
+
+`POST /api/conflict/resolve`（viewer，owner-only）三档判定：`adopt`（旧条逻辑删除并记 superseded）、`keep`（记 related，内容不动）、`unrelated`（记 unrelated，不再提示）。加固项：判定白名单；裁决前重校验该对仍是规则候选（409 否决）；支持 `expected_old_version` 乐观并发；成功后写 `log.jsonl` 审计（`conflict_resolve`）。
+
 ## 冲突扫描收紧（0.19.1）
 
 真库实证：`#339`（配图形态决策）与 `#262`（变更热流上线）这类条目会被旧规则判成「冲突待裁」。

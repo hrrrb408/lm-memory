@@ -95,10 +95,12 @@ export function findConflictPairs(db, { simMin = 0.85, refWindow = 40, maxPairs 
   const vecById = new Map(entries.map((e) => [e.row.id, e.v]));
   for (const e of entries) {
     const text = String(e.row.content || "");
-    // 取代词必须落在"这条引用自己"的括注里：从引用末尾到下一条引用之前。
+    // 取代词必须"贴着"这条引用：
+    //   a) 引用之后的括注段（到下一条引用为止）——「id=319（Agnes 弃用）」式；
+    //   b) 引用之前、且中间不含其他 id 的同一从句——「取代旧方案 id=1」式。
     // 真库实证（2026-11-21）：#339 的「相关：id=319（Agnes 弃用）、id=320 v3（配图惯例）、
-    // id=338（幻影规则）、id=336（真实截图首例）」用固定 ±40 窗口时，319 的「弃用」会
-    // 同时命中后面每一条 id，凭空造出 336/339、320/339、338/339 三对误报。
+    // id=338、id=336」用固定 ±40 窗口时，319 的「弃用」会同时命中后面每一条 id，
+    // 凭空造出三对误报；限定从句后不再跨条目泄漏。
     const refs = [...text.matchAll(/(?:id\s*=\s*|#)(\d+)(?![0-9])/g)];
     for (let k = 0; k < refs.length; k++) {
       const m = refs[k];
@@ -106,9 +108,16 @@ export function findConflictPairs(db, { simMin = 0.85, refWindow = 40, maxPairs 
       if (refId === e.row.id) continue;
       const target = byId.get(refId);
       if (!target) continue;
-      const segEnd = Math.min(refs[k + 1]?.index ?? text.length, (m.index ?? 0) + m[0].length + refWindow);
-      const context = text.slice(m.index ?? 0, segEnd);
-      if (!SUPERSEDE_RE.test(context)) continue; // 纯关联、状态描述或他人括注，不算取代信号
+      const segStart = m.index ?? 0;
+      const segEnd = Math.min(refs[k + 1]?.index ?? text.length, segStart + m[0].length + refWindow);
+      const prevEnd = k > 0 ? (refs[k - 1].index ?? 0) + refs[k - 1][0].length : 0;
+      const segBefore = text.slice(prevEnd, segStart);
+      const segAfter = text.slice(segStart + m[0].length, segEnd);
+      // 前从句两个条件都满足才可用：中间没有别的 id，且去掉括注后仍有取代词
+      // （「（Agnes 弃用）、id=13」的括注属于上一条，不能借给 13）。
+      const beforeClean = !/(?:id\s*=\s*|#)\d+/.test(segBefore);
+      const beforeBare = segBefore.replace(/（[^）]*）/g, '，').replace(/\([^)]*\)/g, ',');
+      if (!(SUPERSEDE_RE.test(segAfter) || (beforeClean && SUPERSEDE_RE.test(beforeBare)))) continue;
       const [lo, hi] = String(target.updated_at) <= String(e.row.updated_at)
         ? [target, e.row]
         : [e.row, target];
@@ -153,13 +162,19 @@ ${list}
 
 /** 解析模型复核输出；解析失败返回 null（调用方降级为候选对播报）。 */
 export function parseReview(text, pairCount) {
-  const arr = JSON.parse(String(text ?? "").match(/\[[\s\S]*\]/)?.[0] ?? "null");
+  let arr;
+  try { arr = JSON.parse(String(text ?? "").match(/\[[\s\S]*\]/)?.[0] ?? "null"); }
+  catch { return null; }
   if (!Array.isArray(arr)) return null;
   const out = [];
+  const seen = new Set();
   for (const v of arr) {
     const i = Number(v?.i);
-    if (!Number.isInteger(i) || i < 0 || i >= pairCount) continue;
-    if (v?.verdict === "superseded" || v?.verdict === "related" || v?.verdict === "unrelated") out.push({ i, verdict: v.verdict });
+    if (!Number.isInteger(i) || i < 0 || i >= pairCount || seen.has(i)) continue;
+    if (v?.verdict === "superseded" || v?.verdict === "related" || v?.verdict === "unrelated") {
+      seen.add(i);
+      out.push({ i, verdict: v.verdict });
+    }
   }
   return out;
 }

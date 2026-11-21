@@ -474,12 +474,15 @@ function startProjectTools(ctx, config, signal) {
   fs.mkdirSync(base, { recursive: true, mode: 0o700 });
   const router = createProjectRouter(base);
   const allowRemote = config.allowRemote === true && process.env.LM_REMOTE_DISABLED !== '1';
+  // 项目库默认关本地双语嵌入（省内存/CPU）。projectEmbed: true 才启用；
+  // 关闭时语义召回、emb 相似度冲突发现与图谱 similar 边都不可用（FTS 字面检索仍在）。
+  const embed = config.projectEmbed === true && process.env.LM_EMBED !== '0';
   const keyEnv = config.llm?.apiKeyEnv;
   const forwarded = ['HOME', 'USERPROFILE', 'PATH', 'SystemRoot'];
   if (allowRemote && typeof keyEnv === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(keyEnv)) forwarded.push(keyEnv);
   const env = Object.fromEntries(forwarded.filter(key => typeof process.env[key] === 'string').map(key => [key, process.env[key]]));
   const backends = createProjectBackends({ command, server: path.join(libDir(), '../../server/memory-server.mjs'),
-    env: { ...env, LM_EMBED: '0', ...(allowRemote ? {} : { LM_REMOTE_DISABLED: '1' }) } });
+    env: { ...env, LM_EMBED: embed ? '1' : '0', ...(allowRemote ? {} : { LM_REMOTE_DISABLED: '1' }) } });
   const close = () => { void backends.close(); };
   signal.addEventListener('abort', close, { once: true });
   try {

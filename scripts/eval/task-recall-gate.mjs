@@ -16,22 +16,30 @@ const lines = file => {
 const events = lines(path.join(dir, 'task-recall-events.jsonl'));
 const audit = lines(path.join(dir, 'log.jsonl'));
 
-// A pointer counts as used only when explicit feedback follows it for that id.
+// v0.19.4 复审加固：反馈必须发生在某次指针提示之后才归因给这次实验。
+// 提示之前就存在的反馈（实验前旧数据）与提示后无反馈的候选都列为 unknown，
+// 不计入分母，避免历史好评把门禁抬过线。
+const pointers = events.filter(e => e.outcome === 'pointer');
+const firstPointerAt = new Map();
+for (const p of pointers) {
+  const t = Date.parse(p.ts);
+  if (!Number.isFinite(t)) continue;
+  if (!firstPointerAt.has(p.id) || t < firstPointerAt.get(p.id)) firstPointerAt.set(p.id, t);
+}
 const feedback = new Map();
 for (const row of audit) if (row.op === 'feedback' && Number.isSafeInteger(row.id)) {
-  const entry = feedback.get(row.id) ?? { useful: 0, notUseful: 0, first: row.ts };
-  if (row.useful === true) entry.useful++; else entry.notUseful++;
+  const entry = feedback.get(row.id) ?? [];
+  entry.push({ useful: row.useful === true, ts: Date.parse(row.ts) });
   feedback.set(row.id, entry);
 }
-const pointers = events.filter(e => e.outcome === 'pointer');
 const offered = new Map();
 for (const p of pointers) offered.set(p.id, (offered.get(p.id) ?? 0) + 1);
-let useful = 0, notUseful = 0, answered = 0;
-for (const id of offered.keys()) {
-  const f = feedback.get(id);
-  if (!f) continue;
+let useful = 0, notUseful = 0, answered = 0, unknown = 0;
+for (const [id, count] of offered) {
+  const afterPointer = (feedback.get(id) ?? []).filter(f => Number.isFinite(f.ts) && f.ts >= (firstPointerAt.get(id) ?? Infinity));
+  if (!afterPointer.length) { unknown++; continue; }
   answered++;
-  if (f.useful) useful++; else notUseful++;
+  if (afterPointer.some(f => f.useful)) useful++; else notUseful++;
 }
 const metrics = {
   events: events.length,
@@ -41,6 +49,7 @@ const metrics = {
   aborted: events.filter(e => e.outcome === 'aborted').length,
   sessions: new Set(events.map(e => e.session)).size,
   candidatesWithFeedback: answered,
+  candidatesWithoutAttributableFeedback: unknown,
   useful,
   notUseful,
 };
@@ -48,7 +57,7 @@ const metrics = {
 // observed misleading candidate, and enough evidence to mean something.
 const rules = [
   { rule: 'pointers >= 20', pass: metrics.pointers >= 20 },
-  { rule: 'candidates with feedback >= 10', pass: metrics.candidatesWithFeedback >= 10 },
+  { rule: 'attributable feedback >= 10 (post-pointer only)', pass: metrics.candidatesWithFeedback >= 10 },
   { rule: 'useful / feedback >= 0.8', pass: metrics.candidatesWithFeedback > 0 && useful / metrics.candidatesWithFeedback >= 0.8 },
   { rule: 'not-useful <= 1', pass: metrics.notUseful <= 1 },
 ];
