@@ -866,22 +866,22 @@ function renderConflicts() {
       if (!item) return toast('这条记忆不在当前快照里');
       openDetail(item, { pair: card.dataset.pair, side: Number(box.dataset.id) === pair.old.id ? 'old' : 'new' });
     }));
-    if (LIVE) {
-      const acts = card.querySelector('.cc-acts');
-      acts.replaceChildren();
-      const go = el('button', 'btn-mini', '点卡片看全文后处理');
-      go.addEventListener('click', () => {
-        const item = DATA.items.find(i => i.id === pair.new.id);
-        if (item) openDetail(item); else toast('这条不在当前快照里');
-      });
-      acts.appendChild(go);
-    }
-    for (const [selector, text] of (LIVE ? [] : [['[data-act-adopt]', '原型模式：采纳新说法，旧条转为历史'],
-      ['[data-act-keep]', '原型模式：保留旧说法，新条标记待批注'],
-      ['[data-act-none]', '已标记为无关：这对不会再出现在待裁决里']])) {
-      card.querySelector(selector).addEventListener('click', () => {
-        card.classList.add('done');
-        toast(text);
+    const acts = LIVE
+      ? [['[data-act-adopt]', 'adopt', '已采纳新说法，旧条转为历史（可审计）'],
+         ['[data-act-keep]', 'keep', '已记录：两条都保留'],
+         ['[data-act-none]', 'unrelated', '已记录：判为无关，不再提示']]
+      : [['[data-act-adopt]', 'adopt', '原型模式：采纳新说法，旧条转为历史'],
+         ['[data-act-keep]', 'keep', '原型模式：保留旧说法，新条标记待批注'],
+         ['[data-act-none]', 'unrelated', '已标记为无关：这对不会再出现在待裁决里']];
+    for (const [selector, verdict, text] of acts) {
+      card.querySelector(selector).addEventListener('click', async () => {
+        if (!LIVE) { card.classList.add('done'); return toast(text); }
+        try {
+          if (verdict === 'adopt' && !confirm('采纳新说法：旧条 #' + pair.old.id + ' 将转为历史（逻辑删除，可审计）？')) return;
+          const r = await api('/api/conflict/resolve', { old: pair.old.id, new: pair.new.id, verdict });
+          toast(r.msg ?? text);
+          if (r.ok) { card.classList.add('done'); await reload(); }
+        } catch (e) { toast('操作失败：' + e.message); }
       });
     }
     host.appendChild(card);

@@ -723,6 +723,22 @@ http.createServer(async (req, res) => {
         const r = await call("memory_pin", { id: body.id, action: body.action, reason: "viewer" });
         return json({ ok: String(r).includes("OK"), msg: String(r).slice(0, 80) });
       }
+      if (u.pathname === "/api/conflict/resolve") {
+        const oldId = Number(body.old), newId = Number(body.new);
+        const oldRow = ro().prepare("SELECT id, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(oldId);
+        const newRow = ro().prepare("SELECT id, kind, content, updated_at FROM memories WHERE id = ? AND status = 'active'").get(newId);
+        if (!oldRow || !newRow) return json({ ok: false, msg: "候选对已变化，请刷新后重试" });
+        if (body.verdict === "adopt") {
+          // 旧说法被接棒：逻辑删除旧条（保留审计），并把这对记为 superseded
+          const r = await call("memory_forget", { id: oldId, reason: "conflict-adopt" });
+          saveConflictReview(oldRow, newRow, "superseded");
+          return json({ ok: String(r).includes("OK"), msg: "已采纳新说法，旧条转为历史（可审计）" });
+        }
+        // 保留旧说法 / 两条无关：只记录判定，不动任何内容
+        const verdict = body.verdict === "keep" ? "related" : "unrelated";
+        saveConflictReview(oldRow, newRow, verdict);
+        return json({ ok: true, msg: verdict === "related" ? "已记录：两条都保留" : "已记录：判为无关，不再提示" });
+      }
       if (u.pathname === "/api/sleep") {
         const r = await call("memory_sleep", {});
         return json({ ok: true, msg: String(r).slice(0, 200) });
