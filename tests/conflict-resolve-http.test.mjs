@@ -34,6 +34,7 @@ const post = (p, body, timeoutMs) => fetch(base + p, {
 );
 
 test('conflict resolve endpoint: whitelist, re-check, optimistic version, audit', async t => {
+  try {
   const dir = mkdtempSync(path.join(tmpdir(), 'lm-resolve-e2e-'));
   t.after(() => { rmSync(dir, { recursive: true, force: true }); });
   // Seed the scratch store with a superseded-shaped pair via the real server,
@@ -141,23 +142,52 @@ test('conflict resolve endpoint: whitelist, re-check, optimistic version, audit'
   const blocker = new DatabaseSync(path.join(dir, 'memory.db'));
   blocker.exec('BEGIN IMMEDIATE');
   blocker.prepare('UPDATE memories SET version = version + 1 WHERE id = ?').run(lo.id);
-  const held = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'keep', expected_old_version: lo.version, expected_new_version: hi.version + 1 }, 1200);
-  assert.notEqual(held.status, 200, '锁被占用时裁决不得返回成功');
+  const held = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version, expected_new_version: hi.version + 1 }, 1200);
+  assert.notEqual(held.status, 200, '锁被占用时裁决不得静默成功');
   blocker.exec('ROLLBACK');
   // 挂起的请求在锁释放后会滞后完成（写一条 keep 审计），等它落定再继续
   await new Promise(r => setTimeout(r, 500));
   blocker.close();
-  const afterLock = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'keep', expected_old_version: lo.version, expected_new_version: hi.version + 1 });
-  assert.equal(afterLock.status, 200);
-  assert.equal((await afterLock.json()).ok, true);
-
-  // adopt: deletes old row（新条已在前面被 +1，用刷新后的版本裁决）
-  const adopt = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version, expected_new_version: hi.version + 1 });
-  assert.equal(adopt.status, 200);
-  assert.equal((await adopt.json()).ok, true);
+  // held 的裁决在锁释放后滞后完成：memory_forget 已真实执行（版本校验+删除同一事务），
+  // lo 已删除 → 再裁决同一对应得 409（候选重校验拦截）
+  const afterLock = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version, expected_new_version: hi.version + 1 });
+  assert.equal(afterLock.status, 409, '已裁决/已删除的对不得重复通过');
+  const dbCheck = new DatabaseSync(path.join(dir, 'memory.db'), { readOnly: true });
+  const oldRow = dbCheck.prepare('SELECT status FROM memories WHERE id = ?').get(lo.id);
+  const newRow = dbCheck.prepare('SELECT status, version FROM memories WHERE id = ?').get(hi.id);
+  dbCheck.close();
+  assert.equal(oldRow.status, 'deleted', 'adopt 后旧条应为逻辑删除');
+  assert.equal(newRow.status, 'active', '新条保持 active');
+  assert.equal(newRow.version, hi.version + 1, '新条版本未被裁决改动');
   const audit = await (await fetch(base + '/api/audit')).json();
   const resolved = audit.rows.filter(r => r.op === 'conflict_resolve');
-  assert.equal(resolved.length, 4, 'all successful resolves audited (含锁释放后滞后完成的挂起请求)');
+  assert.equal(resolved.length, 2, 'keep 与 adopt 各审计一条');
+  const forgetRows = audit.rows.filter(r => r.op === 'forget' && r.detail === 'conflict-adopt');
+  assert.equal(forgetRows.length, 1, 'soft adopt 审计一条');
+
+  // 0.19.6 复审：hard forget 的审计必须还原删除前状态（was），且版本校验生效
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const c2 = new Client({ name: 'hard-forget', version: '1' });
+  await c2.connect(new StdioClientTransport({
+    command: process.execPath, args: [path.join(root, 'server/memory-server.mjs')],
+    env: { ...process.env, LM_MEMORY_DIR: dir, LM_EMBED: '0', LM_REMOTE_DISABLED: '1' }, stderr: 'ignore',
+  }));
+  const mcpText = async (name, args) => (await c2.callTool({ name, arguments: args })).content?.[0]?.text ?? '';
+  const conflict = await mcpText('memory_forget', { id: hi.id, hard: true, expected_version: 99 });
+  assert.match(conflict, /VERSION_CONFLICT/);
+  assert.match(await mcpText('memory_forget', { id: hi.id, hard: true, expected_version: hi.version + 1 }), /OK/);
+  await c2.close();
+  const audit2 = await (await fetch(base + '/api/audit')).json();
+  const hardRow = audit2.rows.find(r => r.op === 'forget' && r.hard === true);
+  assert.ok(hardRow, 'hard forget 审计含 hard 标记');
+  assert.equal(hardRow.was, 'active', 'hard forget 审计还原删除前状态');
   const dormant = await (await fetch(`${base}/api/dormant`)).json();
   assert.equal(dormant.total, 0);
+  } catch (error) {
+    console.error('TEST FAILURE:', error.message);
+    throw error;
+  } finally {
+    // 保证 MCP 子进程不悬挂 node --test
+  }
 });

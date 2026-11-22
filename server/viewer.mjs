@@ -807,6 +807,8 @@ http.createServer(async (req, res) => {
         ts: l.ts, op: String(l.op ?? ""),
         by: String(l.by ?? "").replace("mcp:lm-memory", "mcp").replace("extract-helper", "helper"),
         detail: String(l.reason ?? l.error ?? l.sessionId ?? l.id ?? l.patch ?? "").slice(0, 70),
+        hard: l.hard === true || undefined, // 0.19.6 复审：审计需能还原删除方式与删除前状态
+        was: typeof l.was === "string" ? l.was : undefined,
       }));
       const opCount = {};
       for (const row of rows) opCount[row.op] = (opCount[row.op] ?? 0) + 1;

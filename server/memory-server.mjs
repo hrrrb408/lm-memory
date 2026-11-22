@@ -1099,6 +1099,7 @@ server.registerTool("memory_forget", {
   // 实现要点：BEGIN IMMEDIATE 拿写锁 → 事务内读最新行 → 比对 expected_version
   // → 同一事务内执行删除/软删 → COMMIT。校验失败整事务回滚，不产生部分写入。
   const wantVersion = Number.isSafeInteger(expected_version);
+  let wasStatus = null; // 事务内 fresh 行的删除前状态，供事务外审计使用
   if (hard) {
     // v0.15.1 擦除契约：按 id 物理擦除任何生命周期状态的行。只删此行（含 FTS 索引触发器联动），
     // 不清理版本链其它行、队列文件、历史热流摘要。
@@ -1110,6 +1111,7 @@ server.registerTool("memory_forget", {
         db.exec("ROLLBACK");
         return ok(`VERSION_CONFLICT: id=${id} 当前 v${fresh.version} ≠ 期望 v${expected_version}。请刷新后重试。`);
       }
+      wasStatus = fresh.status;
       db.prepare("INSERT OR IGNORE INTO suppression VALUES (?,?)").run(contentHash(fresh.content), now());
       db.prepare("DELETE FROM provenance WHERE memory_id=?").run(id);
       db.prepare('DELETE FROM corroboration WHERE memory_id=?').run(id);
@@ -1119,7 +1121,7 @@ server.registerTool("memory_forget", {
       db.exec("COMMIT");
     } catch (e) { db.exec("ROLLBACK"); throw e; }
     flushOutbox();
-    audit("forget", { id, reason: reason.slice(0, 80), hard: true, was: "hard" }); // 审计不含全文
+    audit("forget", { id, reason: reason.slice(0, 80), hard: true, was: wasStatus }); // 0.19.6 复审：审计需能还原删除前状态
     regenerateCurrentMd(); rebuildEdgesSafe();
     return ok(`OK: id=${id} 已物理擦除。范围：仅此行（版本链其它行/队列/历史热流摘要不在本次范围）。`);
   }
