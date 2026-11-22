@@ -1,14 +1,20 @@
 {
-  "pluginVersion": "0.19.7",
-  "tgzSha": "7eb21a84d99f8b68e614c777b4e051bfb5c4874136841c291fb48d723277f127",
-  "generated": "2026-11-22T06:31:07.402Z",
+  "pluginVersion": "0.19.8",
+  "tgzSha": "01a92cba0b6407f62acd3a44abd914538667e9cd7236ae8fde8722880d272bb7",
+  "generated": "2026-11-22T12:38:07.238Z",
+  "runner": "dsh-stageb.mjs@0.19.8（验收器修复后重跑：boolean 断言强制 + 测试对象对齐 + 真实外发监测）",
+  "harnessSelfTest": "tests/stageb-harness.test.mjs",
   "env": {
     "node": "v26.13.1",
-    "dsh": "0.2.2-rc.5",
-    "memDir": "/tmp/lm-stageb/dsh-home/data/memory",
-    "isolated": "CHECK"
+    "platform": "darwin/arm64 27.0.0",
+    "host": "huangruibangdeMacBook-Pro.local",
+    "dshInstallDir": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh",
+    "acceptHome": "/tmp/lm-stageb2/dsh-home",
+    "memDir": "/tmp/lm-stageb2/dsh-home/data/memory",
+    "prodDbUnchanged": true,
+    "monitoredPids": 16
   },
-  "total": 38,
-  "pass": 38,
+  "total": 52,
+  "pass": 52,
   "fail": 0
 }

@@ -9,6 +9,12 @@
 - 项目自动召回仍默认关闭；显式开启、会话 ID 在名单内且允许模型上下文外发时，仅读当前绑定项目并提示项目工具及编号，不扫个人库、不续租。安装版探针已在同样授权的 A/B 会话中问同一个锚点，只有拥有该记忆的 A 收到提示。**真实模型下的任务收益仍未验证**，所以门禁不达标就保持关闭。
 - `confirmedOutcomes: true`（默认关闭）允许用户把紧邻上一条助手回复的完整一行逐字写成 `确认结论：原句` 或 `确认修复：原句`，分别存为项目事实或经验。只存该行和用户确认原话，不转发确认消息给提炼模型，不读取或自动采信工具输出。来源证明的是用户确认，不是系统独立验证。安装版探针已验证真实项目续聊后的修复入库，另一项目查不到。
 
+## 嵌入双态（0.19.8）
+
+**项目库默认不加载本地双语嵌入**（`projectEmbed` 默认关闭）：省内存与 CPU。关闭时语义召回、emb 相似度冲突发现与图谱 similar 边都不可用，FTS 字面检索仍在。显式设置 `projectEmbed: true` 且系统级 `LM_EMBED` 不为 `'0'` 才启用。
+
+嵌入模型为本地 ONNX（`Xenova/bge-small-zh-v1.5` + `bge-small-en-v1.5`，transformers.js，q8）。缓存位置由 `LM_EMBED_CACHE` 指定（0.19.8 起转发给项目 server 子进程，可多项目库共享一份模型；不设则落在各库 `<memoryDir>/models`）。双模型已在本地缓存时自动禁用远端清单请求（离线可用）；无缓存首次加载需联网下载一次。能力边界：验收只证明嵌入管线可用与向量真实生成，**语义召回质量未做评测**。
+
 ## 有效日期与跨会话修正
 
 可以在确认事实时显式传 `memory_remember({kind:"fact", ..., valid_from:"2024-01-01"})`。后来发现事实**发生变化**，用当前编号、`expected_version` 和 `effective_from` 调用同库 `memory_correct`；旧事实到生效日停止有效（不含当日）。如果旧说法**本来就错了**，只修正内容，不传 `effective_from`：错误版本不会进入可查询的有效历史，新版继承有效起点。`event_date` 仍是事件／观察日，不被当作有效日期。
@@ -27,6 +33,7 @@
 - `node --test tests/project-*.test.mjs` 验证 Git 身份、持久绑定和三个真实 SQLite/MCP 后端的路由；工具契约快照与真实服务逐项比对。
 - `node scripts/eval/dsh-project-memory-smoke.mjs` 用已安装的 DSH、临时 HOME、两个真实 Git 仓库及 loopback 模型协议桩，验证首次工具发现、A/B 同号读写、个人库跨项目读取和旧全局库未打开。
 - `node scripts/eval/dsh-package-smoke.mjs <包.tgz>` 验证**打包产物**本身（含迁移脚本随包发布）：解包后装进 profile 的 `node_modules`，由已安装 DSH 加载，项目工具注册、写入与召回往返成功，且不生成旧库。
+- `node scripts/eval/dsh-stageb.mjs <隔离HOME> <包.tgz> <报告目录>` 九模块真机验收（DSH 真实宿主 + loopback 模型桩 + 全程隔离），验收器强制 boolean 断言（`tests/stageb-harness.test.mjs`），含生产库 sha256 前后一致与进程级外发监测；M6 自动召回实机验证由 `scripts/eval/dsh-stageb-m6.mjs` 单独执行。
 - `node --test tests/migrate-personal.test.mjs` 验证迁移只带 active 条目、保留事件日期与置顶、重复执行为幂等、源库不被改动。
 - 真实模型：用 `glm-5.3-flash` 对一段真实发布流程对话做提炼，产出 2 条经验 + 1 条会话摘要，经统一提交入口入库后可按「发布流程 暂存验收」「完整回归」召回，日期与来源均在。
 

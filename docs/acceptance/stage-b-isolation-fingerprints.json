@@ -1,0 +1,10 @@
+{
+  "prodDbPath": "/Users/huangruibang/.dsh/memory/memory.db",
+  "prodShaPre": "38dc29cbf017173c2408c4a579e0579bd3e6b003c65369affea6b60f36fc0684",
+  "prodShaPost": "38dc29cbf017173c2408c4a579e0579bd3e6b003c65369affea6b60f36fc0684",
+  "storeA": "2c79d8bb747fd133af4642636797a82eae710483a90b27836e3cd976b8cee9c5",
+  "storeB": "d609927a748a6d549a9ea83ef924f80dd90797010a6221b749b2887943576def",
+  "storeWt": "d5ee6a59437f981359879718157516c2598dbd25161470f61705add3fe2b655a",
+  "memDir": "/tmp/lm-stageb2/dsh-home/data/memory",
+  "acceptHome": "/tmp/lm-stageb2/dsh-home"
+}

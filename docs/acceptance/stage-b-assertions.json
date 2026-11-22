@@ -1,0 +1,470 @@
+[
+  {
+    "module": 1,
+    "name": "DSH 加载并进入对话",
+    "expected": "输出 M1-OK",
+    "actual": "M1-OK",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:07.563Z"
+  },
+  {
+    "module": 1,
+    "name": "旧 MCP 未注册（项目模式收口）",
+    "expected": "不出现 mcp__lm_memory__",
+    "actual": "未出现",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:07.563Z"
+  },
+  {
+    "module": 1,
+    "name": "启动耗时",
+    "expected": "<=45s",
+    "actual": "658ms",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:07.563Z"
+  },
+  {
+    "module": 1,
+    "name": "scoped 工具注册（stub 请求证据）",
+    "expected": "请求含 mcp__lm_project__memory_remember",
+    "actual": "已注册",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:08.452Z"
+  },
+  {
+    "module": 1,
+    "name": "MCP 握手：项目写入工具可用",
+    "expected": "工具被调用且副作用落库",
+    "actual": "called=true landed=true",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:08.453Z"
+  },
+  {
+    "module": 2,
+    "name": "写入 remember（副作用在 A 项目库）",
+    "expected": "store 内可见 MARK-A1",
+    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:09.358Z"
+  },
+  {
+    "module": 2,
+    "name": "检索 recall",
+    "expected": "会话输出含 MARK-A1",
+    "actual": "命中",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.297Z"
+  },
+  {
+    "module": 2,
+    "name": "recall 返回可解析 id",
+    "expected": "id 为正整数",
+    "actual": "id=2",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.566Z"
+  },
+  {
+    "module": 2,
+    "name": "修正 correct（乐观并发）",
+    "expected": "OK 且返回新版本 id",
+    "actual": "OK: 新版本 id=3 v2（取代 id=2）",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.569Z"
+  },
+  {
+    "module": 2,
+    "name": "修正 supersede 链（DB 级）",
+    "expected": "旧行 superseded；新行 active、v=2、指向旧行",
+    "actual": "old=superseded new=active v2 supersedes=2",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.570Z"
+  },
+  {
+    "module": 2,
+    "name": "新版本直读",
+    "expected": "id 直读返回 MARK-A2",
+    "actual": "[\n {\n  \"id\": 3,\n  \"v\": 2,\n  \"kind\": \"fact\",\n  \"date\": \"2026-11-22\",\n  \"content\":",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.571Z"
+  },
+  {
+    "module": 2,
+    "name": "来源回查 source",
+    "expected": "返回非空（NOT_PROVEN 或证据）",
+    "actual": "NOT_PROVEN: 此条没有可回查的原文证据。",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.571Z"
+  },
+  {
+    "module": 2,
+    "name": "反馈 feedback",
+    "expected": "OK",
+    "actual": "OK",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.572Z"
+  },
+  {
+    "module": 2,
+    "name": "列表 list",
+    "expected": "含修正后内容 MARK-A2",
+    "actual": "[\n {\n  \"id\": 3,\n  \"version\": 2,\n  \"kind\": \"fact\",\n  \"content\": \"M2 记忆标记 MARK-A2（",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.572Z"
+  },
+  {
+    "module": 2,
+    "name": "遗忘版本校验",
+    "expected": "错误版本返回 VERSION_CONFLICT",
+    "actual": "VERSION_CONFLICT: id=3 当前 v2 ≠ 期望 v99。请刷新后重试。",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.573Z"
+  },
+  {
+    "module": 2,
+    "name": "逻辑遗忘 forget（正确版本）",
+    "expected": "OK",
+    "actual": "OK: id=3 已删除（逻辑），不再出现在召回与 current.md；需彻底擦除可再次 forget 并 hard=",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.574Z"
+  },
+  {
+    "module": 2,
+    "name": "删除后数据库状态",
+    "expected": "新版本行保留且 status=deleted",
+    "actual": "status=deleted version=2",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.574Z"
+  },
+  {
+    "module": 2,
+    "name": "删除后默认与 all 均不可召回",
+    "expected": "两口径都不返回 MARK-A2",
+    "actual": "[]（无相关记忆。不确定就不编造。）",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:10.576Z"
+  },
+  {
+    "module": 3,
+    "name": "B 项目写入（副作用在 B 项目库）",
+    "expected": "B 库可见 B-ONLY",
+    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/92d84ecff8315aa80b40602b24d6f50894c6cf38d74d24ece69ee60736032047",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:11.691Z"
+  },
+  {
+    "module": 3,
+    "name": "A 看不到 B 的记忆（DB 级隔离）",
+    "expected": "A 库无 B-ONLY",
+    "actual": "storeA=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:12.617Z"
+  },
+  {
+    "module": 3,
+    "name": "个人库写入（副作用在 personal-v1）",
+    "expected": "personal 库可见 PERSONAL-X",
+    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/personal-v1",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:13.537Z"
+  },
+  {
+    "module": 3,
+    "name": "个人库跨项目可见",
+    "expected": "命中 PERSONAL-X",
+    "actual": "命中",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:14.436Z"
+  },
+  {
+    "module": 3,
+    "name": "子目录绑定同一仓库根",
+    "expected": "命中 A 的记忆 MARK-A2",
+    "actual": "命中",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:15.308Z"
+  },
+  {
+    "module": 3,
+    "name": "worktree 视为独立项目（副作用在独立库）",
+    "expected": "WT 库可见且 ≠ A",
+    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/ced09025498a2877bed58a19e50aee9d9b61fb2b24500b93739f5c9f7ac5f075",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:16.231Z"
+  },
+  {
+    "module": 3,
+    "name": "A 看不到 worktree 的记忆（DB 级隔离）",
+    "expected": "A 库无 WT-X",
+    "actual": "storeA=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:17.199Z"
+  },
+  {
+    "module": 3,
+    "name": "物理库数量",
+    "expected": "projects-v1 >= 3 且 personal-v1 存在",
+    "actual": "3 个项目库 / 个人库 存在",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:36:17.199Z"
+  },
+  {
+    "module": 4,
+    "name": "嵌入模型预热（搭建期联网，测试期离线）",
+    "expected": "双模型缓存就绪",
+    "actual": "双模型缓存就绪",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:00.245Z"
+  },
+  {
+    "module": 4,
+    "name": "projectEmbed=false：字面检索可用",
+    "expected": "M2/M3 的 recall 真实命中（非写死）",
+    "actual": "{\"m2\":true,\"bPersonal\":true,\"sub\":true}",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:00.245Z"
+  },
+  {
+    "module": 4,
+    "name": "projectEmbed=true（DSH 项目模式）：向量真实生成",
+    "expected": "项目库 emb 非空 1 条",
+    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory-embed/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7 emb=1",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:01.270Z"
+  },
+  {
+    "module": 4,
+    "name": "独立 server LM_EMBED=1：嵌入管线",
+    "expected": "emb 非空 1 条",
+    "actual": "emb=1",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:01.747Z"
+  },
+  {
+    "module": 4,
+    "name": "双态文档声明",
+    "expected": "打包 docs 写明默认关嵌入与能力边界",
+    "actual": "声明存在",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:01.747Z"
+  },
+  {
+    "module": 5,
+    "name": "带标签记忆写入（A 项目库）",
+    "expected": "两条写入 OK",
+    "actual": "g1=true g2=true",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:01.978Z"
+  },
+  {
+    "module": 5,
+    "name": "图谱节点（A 项目库）",
+    "expected": "活跃记忆 >= 3",
+    "actual": "nodes=3",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:01.978Z"
+  },
+  {
+    "module": 5,
+    "name": "关系类型存在",
+    "expected": "co_tag >= 1（共享标签）",
+    "actual": "{\"co_tag\":1,\"similar\":0,\"ref\":0}",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:01.978Z"
+  },
+  {
+    "module": 5,
+    "name": "similar 边在关闭嵌入的库为 0（诚实降级）",
+    "expected": "similar=0",
+    "actual": "similar=0",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:01.978Z"
+  },
+  {
+    "module": 6,
+    "name": "taskRecall 需显式开启（默认关闭）",
+    "expected": "默认运行无候选指针注入",
+    "actual": "无指针",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:02.644Z"
+  },
+  {
+    "module": 6,
+    "name": "指针注入与门禁（独立实机 runner）",
+    "expected": "stage-b-m6-optin 全 PASS",
+    "actual": "5/5",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:02.644Z"
+  },
+  {
+    "module": 7,
+    "name": "viewer SIGKILL 后重启",
+    "expected": "崩溃前可访问 / 确认死亡 / 重启后可访问",
+    "actual": "alive1=true dead=true alive2=true",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:04.393Z"
+  },
+  {
+    "module": 7,
+    "name": "崩溃前标记可见",
+    "expected": "API 返回 MARK-CRASH",
+    "actual": "可见",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:04.393Z"
+  },
+  {
+    "module": 7,
+    "name": "重启后标记仍在",
+    "expected": "API 返回 MARK-CRASH",
+    "actual": "可见",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:04.393Z"
+  },
+  {
+    "module": 7,
+    "name": "崩溃后项目库完好",
+    "expected": "integrity_check=ok 且标记行在库",
+    "actual": "integrity=ok rows=1",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:04.394Z"
+  },
+  {
+    "module": 8,
+    "name": "外发监测器自检",
+    "expected": "探测器能捕获非 loopback 连接",
+    "actual": "lan=192.168.2.193 hits=121",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:06.029Z"
+  },
+  {
+    "module": 8,
+    "name": "凭据写入被拒",
+    "expected": "REFUSED",
+    "actual": "REFUSED: 内容疑似凭据。秘密不入记忆库。",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:06.244Z"
+  },
+  {
+    "module": 8,
+    "name": "库中无凭据残留",
+    "expected": "memDir 与 A 项目库均 0 条",
+    "actual": "leaked=0",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:06.245Z"
+  },
+  {
+    "module": 9,
+    "name": "批量写入 30 条",
+    "expected": "<=5s",
+    "actual": "26ms",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:06.662Z"
+  },
+  {
+    "module": 9,
+    "name": "召回延迟 p50/p100",
+    "expected": "p50<=300ms",
+    "actual": "p50=1ms p100=3ms",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:06.662Z"
+  },
+  {
+    "module": 9,
+    "name": "验收进程 RSS",
+    "expected": "<=512MB",
+    "actual": "152MB",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:06.662Z"
+  },
+  {
+    "module": 10,
+    "name": "验收数据目录在隔离 HOME 内",
+    "expected": "memDir 位于 acceptHome 下",
+    "actual": "/tmp/lm-stageb2/dsh-home/data/memory",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:07.199Z"
+  },
+  {
+    "module": 10,
+    "name": "生产记忆库全程未变",
+    "expected": "sha256 前后一致（未触碰 ~/.dsh/memory）",
+    "actual": "pre=38dc29cbf017 post=38dc29cbf017",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:07.199Z"
+  },
+  {
+    "module": 10,
+    "name": "项目库指纹互异",
+    "expected": "A/B/WT 三库 sha256 互不相同",
+    "actual": "2c79d8bb/d609927a/d5ee6a59",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:07.237Z"
+  },
+  {
+    "module": 10,
+    "name": "受监视进程无非 loopback 外联",
+    "expected": "自检基线后 0 命中（250-400ms 采样 + 子进程树展开）",
+    "actual": "hits=0 pids=16",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:07.237Z"
+  },
+  {
+    "module": 10,
+    "name": "代理汇点零命中",
+    "expected": "HTTP(S)_PROXY 指向本地汇点，全程 0 请求",
+    "actual": "sinkHits=0",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T12:38:07.237Z"
+  }
+]

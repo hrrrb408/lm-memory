@@ -466,6 +466,15 @@ function registerProjectLifecycle(ctx, router, config, signal) {
   });
 }
 
+// 项目 server 子进程环境：白名单转发 + 显式嵌入/外发开关（导出以便单测）。
+// 0.19.8：LM_EMBED_CACHE 加入白名单——嵌入模型缓存可放顶层目录，项目库不必各自下载模型。
+export function projectServerEnv(processEnv, { allowRemote, keyEnv, embed }) {
+  const forwarded = ['HOME', 'USERPROFILE', 'PATH', 'SystemRoot', 'LM_EMBED_CACHE'];
+  if (allowRemote && typeof keyEnv === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(keyEnv)) forwarded.push(keyEnv);
+  const env = Object.fromEntries(forwarded.filter(key => typeof processEnv[key] === 'string').map(key => [key, processEnv[key]]));
+  return { ...env, LM_EMBED: embed ? '1' : '0', ...(allowRemote ? {} : { LM_REMOTE_DISABLED: '1' }) };
+}
+
 function startProjectTools(ctx, config, signal) {
   signal.throwIfAborted();
   const base = path.resolve(config.memoryDir || process.env.LM_MEMORY_DIR || path.join(os.homedir(), '.lm-memory'));
@@ -477,12 +486,8 @@ function startProjectTools(ctx, config, signal) {
   // 项目库默认关本地双语嵌入（省内存/CPU）。projectEmbed: true 才启用；
   // 关闭时语义召回、emb 相似度冲突发现与图谱 similar 边都不可用（FTS 字面检索仍在）。
   const embed = config.projectEmbed === true && process.env.LM_EMBED !== '0';
-  const keyEnv = config.llm?.apiKeyEnv;
-  const forwarded = ['HOME', 'USERPROFILE', 'PATH', 'SystemRoot'];
-  if (allowRemote && typeof keyEnv === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(keyEnv)) forwarded.push(keyEnv);
-  const env = Object.fromEntries(forwarded.filter(key => typeof process.env[key] === 'string').map(key => [key, process.env[key]]));
   const backends = createProjectBackends({ command, server: path.join(libDir(), '../../server/memory-server.mjs'),
-    env: { ...env, LM_EMBED: embed ? '1' : '0', ...(allowRemote ? {} : { LM_REMOTE_DISABLED: '1' }) } });
+    env: projectServerEnv(process.env, { allowRemote, keyEnv: config.llm?.apiKeyEnv, embed }) });
   const close = () => { void backends.close(); };
   signal.addEventListener('abort', close, { once: true });
   try {
