@@ -1,0 +1,76 @@
+PASS [M1] DSH 加载并进入对话 — M1-OK
+PASS [M1] 旧 MCP 未注册（项目模式收口） — 未出现
+PASS [M1] 启动耗时 — 640ms
+PASS [M1] scoped 工具注册（stub 请求证据） — 已注册
+PASS [M1] MCP 握手：项目写入工具可用 — called=true landed=true
+PASS [M2] 写入 remember（副作用在 A 项目库） — store=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c
+PASS [M2] 检索 recall — 命中
+PASS [M2] recall 返回可解析 id — id=2
+PASS [M2] 修正 correct（乐观并发） — OK: 新版本 id=3 v2（取代 id=2）
+PASS [M2] 修正 supersede 链（DB 级） — old=superseded new=active v2 supersedes=2
+PASS [M2] 新版本直读 — [
+ {
+  "id": 3,
+  "v": 2,
+  "kind": "fact",
+  "date": "2026-11-22",
+  "content":
+PASS [M2] 来源回查 source — NOT_PROVEN: 此条没有可回查的原文证据。
+PASS [M2] 反馈 feedback — OK
+PASS [M2] 列表 list — [
+ {
+  "id": 3,
+  "version": 2,
+  "kind": "fact",
+  "content": "M2 记忆标记 MARK-A2（
+PASS [M2] 遗忘版本校验 — VERSION_CONFLICT: id=3 当前 v2 ≠ 期望 v99。请刷新后重试。
+PASS [M2] 逻辑遗忘 forget（正确版本） — OK: id=3 已删除（逻辑），不再出现在召回与 current.md；需彻底擦除可再次 forget 并 hard=
+PASS [M2] 删除后数据库状态 — status=deleted version=2
+PASS [M2] 删除后默认与 all 均不可召回 — []（无相关记忆。不确定就不编造。）
+PASS [M3] B 项目写入（副作用在 B 项目库） — store=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/eae0f1284d67e65c08346c1233c88d5973b53f4f205d0b2ae58ed67fbc51291d
+PASS [M3] A 看不到 B 的记忆（DB 级隔离） — storeA=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c
+PASS [M3] 个人库写入（副作用在 personal-v1） — store=/tmp/lm-stageb-final/dsh-home/data/memory/personal-v1
+PASS [M3] 个人库跨项目可见 — 命中
+PASS [M3] 子目录绑定同一仓库根 — 命中
+PASS [M3] worktree 视为独立项目（副作用在独立库） — store=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/b20f640ab83d38138e1294e24769313ee5ce7d87f23e0213bcc0f5509c5c480e
+PASS [M3] A 看不到 worktree 的记忆（DB 级隔离） — storeA=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c
+PASS [M3] 物理库数量 — 3 个项目库 / 个人库 存在
+PASS [M4] 嵌入模型预热（搭建期联网，测试期离线） — 双模型缓存就绪
+PASS [M4] projectEmbed=false：字面检索可用 — {"m2":true,"bPersonal":true,"sub":true}
+PASS [M4] projectEmbed=true（DSH 项目模式）：向量真实生成 — store=/tmp/lm-stageb-final/dsh-home/data/memory-embed/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c emb=1
+PASS [M4] 独立 server LM_EMBED=1：嵌入管线 — emb=1
+PASS [M4] 双态文档声明 — 声明存在
+PASS [M5] 带标签记忆写入（A 项目库） — g1=true g2=true
+PASS [M5] 图谱节点（A 项目库） — nodes=3
+PASS [M5] 关系类型存在 — {"co_tag":1,"similar":0,"ref":0}
+PASS [M5] similar 边在关闭嵌入的库为 0（诚实降级） — similar=0
+PASS [M6] taskRecall 需显式开启（默认关闭） — 无指针
+PASS [MM6] 回合 1 — sid=session-8cf53c71-0… 有效=true 锚点落库=true
+PASS [MM6] 回合 2 — 指针已注入模型请求
+PASS [MM6] 事件留痕 — 新增 1 行
+PASS [MM6] 隐私边界 — 无用户文本
+PASS [MM6] 回合 3 — 未注入
+
+M6 实机验证：5/5 PASS
+PASS [M6] 指针注入与门禁（本包实机重跑） — 5/5 v=0.19.8 sha=9a0b0c7e 版本绑定=true
+PASS [M7] viewer SIGKILL 后重启 — alive1=true dead=true alive2=true
+PASS [M7] 崩溃前标记可见 — 可见
+PASS [M7] 重启后标记仍在 — 可见
+PASS [M7] 崩溃后项目库完好 — integrity=ok rows=1
+PASS [M8] 外发监测器自检 — lan=192.168.2.193:63919 probeHits=1 exactMatch=true
+PASS [M8] 凭据写入被拒 — REFUSED: 内容疑似凭据。秘密不入记忆库。
+PASS [M8] 库中无凭据残留 — leaked=0
+PASS [M9] 批量写入 30 条 — 23ms
+PASS [M9] 召回延迟 p50/p100 — p50=1ms p100=2ms
+PASS [M9] 验收进程 RSS — 147MB
+PASS [M10] 生产记忆目录指纹（含 WAL/SHM） — 41 文件；变更 0 处
+PASS [M10] 验收进程零生产句柄 — handles=0
+PASS [M10] 验收数据目录在隔离 HOME 内 — /tmp/lm-stageb-final/dsh-home/data/memory
+PASS [M10] 项目库指纹互异 — 5023544c/e78d9032/906abae6
+PASS [M10] 记忆组件零外联 — hits=0
+PASS [M10] 宿主进程外联归类披露 — hits=0 远端 0 种：
+PASS [M10] PID 身份核验 — expired=23 suspect=0
+PASS [M10] 监测覆盖窗口 — sampler=2026-11-22T13:59:15.667Z firstWatch=2026-11-22T13:59:15.671Z
+PASS [M10] 代理汇点零命中 — sinkHits=0
+
+阶段 B：56/56 PASS — 报告在 /tmp/lm-stageb-final/report

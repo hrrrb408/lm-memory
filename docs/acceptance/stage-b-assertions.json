@@ -6,7 +6,7 @@
     "actual": "M1-OK",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:07.563Z"
+    "at": "2026-11-22T13:59:16.307Z"
   },
   {
     "module": 1,
@@ -15,16 +15,16 @@
     "actual": "未出现",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:07.563Z"
+    "at": "2026-11-22T13:59:16.307Z"
   },
   {
     "module": 1,
     "name": "启动耗时",
     "expected": "<=45s",
-    "actual": "658ms",
+    "actual": "640ms",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:07.563Z"
+    "at": "2026-11-22T13:59:16.307Z"
   },
   {
     "module": 1,
@@ -33,7 +33,7 @@
     "actual": "已注册",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:08.452Z"
+    "at": "2026-11-22T13:59:17.226Z"
   },
   {
     "module": 1,
@@ -42,16 +42,16 @@
     "actual": "called=true landed=true",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:08.453Z"
+    "at": "2026-11-22T13:59:17.227Z"
   },
   {
     "module": 2,
     "name": "写入 remember（副作用在 A 项目库）",
     "expected": "store 内可见 MARK-A1",
-    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7",
+    "actual": "store=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:09.358Z"
+    "at": "2026-11-22T13:59:18.113Z"
   },
   {
     "module": 2,
@@ -60,7 +60,7 @@
     "actual": "命中",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.297Z"
+    "at": "2026-11-22T13:59:18.994Z"
   },
   {
     "module": 2,
@@ -69,7 +69,7 @@
     "actual": "id=2",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.566Z"
+    "at": "2026-11-22T13:59:19.220Z"
   },
   {
     "module": 2,
@@ -78,7 +78,7 @@
     "actual": "OK: 新版本 id=3 v2（取代 id=2）",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.569Z"
+    "at": "2026-11-22T13:59:19.222Z"
   },
   {
     "module": 2,
@@ -87,7 +87,7 @@
     "actual": "old=superseded new=active v2 supersedes=2",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.570Z"
+    "at": "2026-11-22T13:59:19.222Z"
   },
   {
     "module": 2,
@@ -96,7 +96,7 @@
     "actual": "[\n {\n  \"id\": 3,\n  \"v\": 2,\n  \"kind\": \"fact\",\n  \"date\": \"2026-11-22\",\n  \"content\":",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.571Z"
+    "at": "2026-11-22T13:59:19.224Z"
   },
   {
     "module": 2,
@@ -105,7 +105,7 @@
     "actual": "NOT_PROVEN: 此条没有可回查的原文证据。",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.571Z"
+    "at": "2026-11-22T13:59:19.224Z"
   },
   {
     "module": 2,
@@ -114,7 +114,7 @@
     "actual": "OK",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.572Z"
+    "at": "2026-11-22T13:59:19.225Z"
   },
   {
     "module": 2,
@@ -123,7 +123,7 @@
     "actual": "[\n {\n  \"id\": 3,\n  \"version\": 2,\n  \"kind\": \"fact\",\n  \"content\": \"M2 记忆标记 MARK-A2（",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.572Z"
+    "at": "2026-11-22T13:59:19.225Z"
   },
   {
     "module": 2,
@@ -132,7 +132,7 @@
     "actual": "VERSION_CONFLICT: id=3 当前 v2 ≠ 期望 v99。请刷新后重试。",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.573Z"
+    "at": "2026-11-22T13:59:19.225Z"
   },
   {
     "module": 2,
@@ -141,7 +141,7 @@
     "actual": "OK: id=3 已删除（逻辑），不再出现在召回与 current.md；需彻底擦除可再次 forget 并 hard=",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.574Z"
+    "at": "2026-11-22T13:59:19.227Z"
   },
   {
     "module": 2,
@@ -150,7 +150,7 @@
     "actual": "status=deleted version=2",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.574Z"
+    "at": "2026-11-22T13:59:19.227Z"
   },
   {
     "module": 2,
@@ -159,34 +159,34 @@
     "actual": "[]（无相关记忆。不确定就不编造。）",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:10.576Z"
+    "at": "2026-11-22T13:59:19.228Z"
   },
   {
     "module": 3,
     "name": "B 项目写入（副作用在 B 项目库）",
     "expected": "B 库可见 B-ONLY",
-    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/92d84ecff8315aa80b40602b24d6f50894c6cf38d74d24ece69ee60736032047",
+    "actual": "store=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/eae0f1284d67e65c08346c1233c88d5973b53f4f205d0b2ae58ed67fbc51291d",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:11.691Z"
+    "at": "2026-11-22T13:59:20.126Z"
   },
   {
     "module": 3,
     "name": "A 看不到 B 的记忆（DB 级隔离）",
     "expected": "A 库无 B-ONLY",
-    "actual": "storeA=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7",
+    "actual": "storeA=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:12.617Z"
+    "at": "2026-11-22T13:59:20.996Z"
   },
   {
     "module": 3,
     "name": "个人库写入（副作用在 personal-v1）",
     "expected": "personal 库可见 PERSONAL-X",
-    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/personal-v1",
+    "actual": "store=/tmp/lm-stageb-final/dsh-home/data/memory/personal-v1",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:13.537Z"
+    "at": "2026-11-22T13:59:21.841Z"
   },
   {
     "module": 3,
@@ -195,7 +195,7 @@
     "actual": "命中",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:14.436Z"
+    "at": "2026-11-22T13:59:22.672Z"
   },
   {
     "module": 3,
@@ -204,25 +204,25 @@
     "actual": "命中",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:15.308Z"
+    "at": "2026-11-22T13:59:23.507Z"
   },
   {
     "module": 3,
     "name": "worktree 视为独立项目（副作用在独立库）",
     "expected": "WT 库可见且 ≠ A",
-    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/ced09025498a2877bed58a19e50aee9d9b61fb2b24500b93739f5c9f7ac5f075",
+    "actual": "store=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/b20f640ab83d38138e1294e24769313ee5ce7d87f23e0213bcc0f5509c5c480e",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:16.231Z"
+    "at": "2026-11-22T13:59:24.439Z"
   },
   {
     "module": 3,
     "name": "A 看不到 worktree 的记忆（DB 级隔离）",
     "expected": "A 库无 WT-X",
-    "actual": "storeA=/tmp/lm-stageb2/dsh-home/data/memory/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7",
+    "actual": "storeA=/tmp/lm-stageb-final/dsh-home/data/memory/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:17.199Z"
+    "at": "2026-11-22T13:59:25.281Z"
   },
   {
     "module": 3,
@@ -231,7 +231,7 @@
     "actual": "3 个项目库 / 个人库 存在",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:36:17.199Z"
+    "at": "2026-11-22T13:59:25.281Z"
   },
   {
     "module": 4,
@@ -240,7 +240,7 @@
     "actual": "双模型缓存就绪",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:00.245Z"
+    "at": "2026-11-22T14:01:32.754Z"
   },
   {
     "module": 4,
@@ -249,16 +249,16 @@
     "actual": "{\"m2\":true,\"bPersonal\":true,\"sub\":true}",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:00.245Z"
+    "at": "2026-11-22T14:01:32.754Z"
   },
   {
     "module": 4,
     "name": "projectEmbed=true（DSH 项目模式）：向量真实生成",
     "expected": "项目库 emb 非空 1 条",
-    "actual": "store=/tmp/lm-stageb2/dsh-home/data/memory-embed/projects-v1/f558890a1521592dc473e3e729c96dba413af8589a7787fcc0c4092e67cf56a7 emb=1",
+    "actual": "store=/tmp/lm-stageb-final/dsh-home/data/memory-embed/projects-v1/4a94048544bc55e3c83f48a9fed4c67bfd5e7b74f4cdbb3f75a7bd5f8c56c06c emb=1",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:01.270Z"
+    "at": "2026-11-22T14:01:33.736Z"
   },
   {
     "module": 4,
@@ -267,7 +267,7 @@
     "actual": "emb=1",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:01.747Z"
+    "at": "2026-11-22T14:01:34.064Z"
   },
   {
     "module": 4,
@@ -276,7 +276,7 @@
     "actual": "声明存在",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:01.747Z"
+    "at": "2026-11-22T14:01:34.065Z"
   },
   {
     "module": 5,
@@ -285,7 +285,7 @@
     "actual": "g1=true g2=true",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:01.978Z"
+    "at": "2026-11-22T14:01:34.262Z"
   },
   {
     "module": 5,
@@ -294,7 +294,7 @@
     "actual": "nodes=3",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:01.978Z"
+    "at": "2026-11-22T14:01:34.262Z"
   },
   {
     "module": 5,
@@ -303,7 +303,7 @@
     "actual": "{\"co_tag\":1,\"similar\":0,\"ref\":0}",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:01.978Z"
+    "at": "2026-11-22T14:01:34.262Z"
   },
   {
     "module": 5,
@@ -312,7 +312,7 @@
     "actual": "similar=0",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:01.978Z"
+    "at": "2026-11-22T14:01:34.262Z"
   },
   {
     "module": 6,
@@ -321,16 +321,16 @@
     "actual": "无指针",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:02.644Z"
+    "at": "2026-11-22T14:01:34.916Z"
   },
   {
     "module": 6,
-    "name": "指针注入与门禁（独立实机 runner）",
-    "expected": "stage-b-m6-optin 全 PASS",
-    "actual": "5/5",
+    "name": "指针注入与门禁（本包实机重跑）",
+    "expected": "M6 runner 全 PASS 且 pluginVersion/tgzSha 与本验收安装包一致",
+    "actual": "5/5 v=0.19.8 sha=9a0b0c7e 版本绑定=true",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:02.644Z"
+    "at": "2026-11-22T14:01:37.856Z"
   },
   {
     "module": 7,
@@ -339,7 +339,7 @@
     "actual": "alive1=true dead=true alive2=true",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:04.393Z"
+    "at": "2026-11-22T14:01:39.366Z"
   },
   {
     "module": 7,
@@ -348,7 +348,7 @@
     "actual": "可见",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:04.393Z"
+    "at": "2026-11-22T14:01:39.366Z"
   },
   {
     "module": 7,
@@ -357,7 +357,7 @@
     "actual": "可见",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:04.393Z"
+    "at": "2026-11-22T14:01:39.366Z"
   },
   {
     "module": 7,
@@ -366,16 +366,16 @@
     "actual": "integrity=ok rows=1",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:04.394Z"
+    "at": "2026-11-22T14:01:39.367Z"
   },
   {
     "module": 8,
     "name": "外发监测器自检",
-    "expected": "探测器能捕获非 loopback 连接",
-    "actual": "lan=192.168.2.193 hits=121",
+    "expected": "探针 pid 精确命中 lan-ip:port",
+    "actual": "lan=192.168.2.193:63919 probeHits=1 exactMatch=true",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:06.029Z"
+    "at": "2026-11-22T14:01:40.872Z"
   },
   {
     "module": 8,
@@ -384,7 +384,7 @@
     "actual": "REFUSED: 内容疑似凭据。秘密不入记忆库。",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:06.244Z"
+    "at": "2026-11-22T14:01:41.086Z"
   },
   {
     "module": 8,
@@ -393,70 +393,106 @@
     "actual": "leaked=0",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:06.245Z"
+    "at": "2026-11-22T14:01:41.086Z"
   },
   {
     "module": 9,
     "name": "批量写入 30 条",
     "expected": "<=5s",
-    "actual": "26ms",
+    "actual": "23ms",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:06.662Z"
+    "at": "2026-11-22T14:01:41.312Z"
   },
   {
     "module": 9,
     "name": "召回延迟 p50/p100",
     "expected": "p50<=300ms",
-    "actual": "p50=1ms p100=3ms",
+    "actual": "p50=1ms p100=2ms",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:06.662Z"
+    "at": "2026-11-22T14:01:41.312Z"
   },
   {
     "module": 9,
     "name": "验收进程 RSS",
     "expected": "<=512MB",
-    "actual": "152MB",
+    "actual": "147MB",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:06.662Z"
+    "at": "2026-11-22T14:01:41.312Z"
+  },
+  {
+    "module": 10,
+    "name": "生产记忆目录指纹（含 WAL/SHM）",
+    "expected": "运行期间 ~/.dsh/memory 零变更（并发会话写入会如实 FAIL，见下一行句柄证据）",
+    "actual": "41 文件；变更 0 处",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T14:01:42.371Z"
+  },
+  {
+    "module": 10,
+    "name": "验收进程零生产句柄",
+    "expected": "全程无监视进程打开 ~/.dsh/memory 下任何文件（非涉及性证明）",
+    "actual": "handles=0",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T14:01:42.371Z"
   },
   {
     "module": 10,
     "name": "验收数据目录在隔离 HOME 内",
     "expected": "memDir 位于 acceptHome 下",
-    "actual": "/tmp/lm-stageb2/dsh-home/data/memory",
+    "actual": "/tmp/lm-stageb-final/dsh-home/data/memory",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:07.199Z"
-  },
-  {
-    "module": 10,
-    "name": "生产记忆库全程未变",
-    "expected": "sha256 前后一致（未触碰 ~/.dsh/memory）",
-    "actual": "pre=38dc29cbf017 post=38dc29cbf017",
-    "pass": true,
-    "detail": "",
-    "at": "2026-11-22T12:38:07.199Z"
+    "at": "2026-11-22T14:01:42.371Z"
   },
   {
     "module": 10,
     "name": "项目库指纹互异",
     "expected": "A/B/WT 三库 sha256 互不相同",
-    "actual": "2c79d8bb/d609927a/d5ee6a59",
+    "actual": "5023544c/e78d9032/906abae6",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:07.237Z"
+    "at": "2026-11-22T14:01:42.401Z"
   },
   {
     "module": 10,
-    "name": "受监视进程无非 loopback 外联",
-    "expected": "自检基线后 0 命中（250-400ms 采样 + 子进程树展开）",
-    "actual": "hits=0 pids=16",
+    "name": "记忆组件零外联",
+    "expected": "memory-server/viewer 全程无非 loopback 连接",
+    "actual": "hits=0",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:07.237Z"
+    "at": "2026-11-22T14:01:42.401Z"
+  },
+  {
+    "module": 10,
+    "name": "宿主进程外联归类披露",
+    "expected": "每条命中归属 pid/命令/远端，附 PTR 反查（宿主基础设施，非记忆组件）",
+    "actual": "hits=0 远端 0 种：",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T14:01:42.401Z"
+  },
+  {
+    "module": 10,
+    "name": "PID 身份核验",
+    "expected": "采样前核验进程身份，防 PID 复用误归因",
+    "actual": "expired=23 suspect=0",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T14:01:42.401Z"
+  },
+  {
+    "module": 10,
+    "name": "监测覆盖窗口",
+    "expected": "采样器先于首个被监视进程启动",
+    "actual": "sampler=2026-11-22T13:59:15.667Z firstWatch=2026-11-22T13:59:15.671Z",
+    "pass": true,
+    "detail": "",
+    "at": "2026-11-22T14:01:42.401Z"
   },
   {
     "module": 10,
@@ -465,6 +501,6 @@
     "actual": "sinkHits=0",
     "pass": true,
     "detail": "",
-    "at": "2026-11-22T12:38:07.237Z"
+    "at": "2026-11-22T14:01:42.401Z"
   }
 ]

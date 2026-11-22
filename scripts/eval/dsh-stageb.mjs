@@ -130,6 +130,8 @@ let firstWatchAt = null;
 let expiredPids = 0;
 let suspectPidHits = 0;          // 身份翻转前已有命中 → 可能误归因，如实 FAIL
 const seenConns = new Set();     // 同一连接跨采样轮去重
+const seenHandles = new Set();   // 同一生产文件句柄跨采样轮去重
+const prodHandleHits = [];       // 验收进程打开过生产记忆目录文件的记录（应为空）
 const isLoopback = (h) => {
   const n = h.replace(/^::ffff:/i, '').replace(/^::(127\.\d+\.\d+\.\d+)$/, '$1'); // v4-mapped 归一
   return n === '127.0.0.1' || n === 'localhost' || n === '::1' || n.startsWith('127.') || n === '[::1]';
@@ -182,6 +184,20 @@ function sampleEgress(pids) {
   }
   return found;
 }
+function sampleProdHandles(pids) {
+  if (!pids.length) return [];
+  let out = '';
+  try { out = execFileSync('lsof', ['-a', '-p', pids.join(','), '-F', 'n'], { encoding: 'utf8', timeout: 15000 }); }
+  catch (e) { out = e.stdout ?? ''; }
+  const found = []; let cur = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('p')) { cur = Number(line.slice(1)); continue; }
+    if (!line.startsWith('n')) continue;
+    const p = line.slice(1);
+    if (p === prodDir || p.startsWith(prodDir + '/')) found.push({ pid: cur, path: p });
+  }
+  return found;
+}
 let expansionCache = [], expansionAt = 0;
 const samplerStartedAt = new Date().toISOString();
 const sampler = setInterval(() => {
@@ -221,6 +237,13 @@ const sampler = setInterval(() => {
       label: monitoredPids.get(h.pid)?.label ?? '?', cmd: (cmds.get(h.pid) ?? '').slice(0, 160),
       remote: h.remote, kind: h.pid === probePid ? 'probe' : 'monitored',
     });
+  }
+  // 生产句柄监测：验收进程若打开过 ~/.dsh/memory 下任何文件，此处如实记录（配合目录指纹区分外部写入）
+  for (const h of sampleProdHandles(alive)) {
+    const key = `${h.pid}|${h.path}`;
+    if (seenHandles.has(key)) continue;
+    seenHandles.add(key);
+    prodHandleHits.push({ at: new Date().toISOString(), pid: h.pid, label: monitoredPids.get(h.pid)?.label ?? '?', path: h.path });
   }
 }, 400);
 sampler.unref?.();
@@ -728,9 +751,10 @@ await sleep(500); // 最后一个采样窗口内的连接落地
     }
   }
   const prodMutations = changed.length + added.length;
-  record(10, '生产记忆目录指纹（含 WAL/SHM）', '运行期间 ~/.dsh/memory 零变更（并发会话写入会如实 FAIL）',
+  record(10, '生产记忆目录指纹（含 WAL/SHM）', '运行期间 ~/.dsh/memory 零变更（并发会话写入会如实 FAIL，见下一行句柄证据）',
     `${Object.keys(prodFpPost ?? {}).length} 文件；变更 ${prodMutations} 处${changed.concat(added).length ? '：' + changed.concat(added).slice(0, 5).join(', ') : ''}`,
     !!prodFpPre && !!prodFpPost && prodMutations === 0);
+  record(10, '验收进程零生产句柄', '全程无监视进程打开 ~/.dsh/memory 下任何文件（非涉及性证明）', `handles=${prodHandleHits.length}`, prodHandleHits.length === 0);
   record(10, '验收数据目录在隔离 HOME 内', 'memDir 位于 acceptHome 下', memDir, memDir.startsWith(acceptHome));
   const fA = sha(path.join(storeA, 'memory.db'));
   const fB = sha(path.join(storeB, 'memory.db'));
@@ -757,7 +781,7 @@ await sleep(500); // 最后一个采样窗口内的连接落地
   record(10, '监测覆盖窗口', '采样器先于首个被监视进程启动', `sampler=${samplerStartedAt} firstWatch=${firstWatchAt}`, !!firstWatchAt && samplerStartedAt <= firstWatchAt);
   record(10, '代理汇点零命中', 'HTTP(S)_PROXY 指向本地汇点，全程 0 请求', `sinkHits=${sinkHits}`, sinkHits === 0);
   evidence('egress-monitor.json', { samplerStartedAt, monitored: [...monitoredPids.entries()].map(([pid, v]) => ({ pid, ...v })), hits: egressHits, sinkHits, expiredPids, suspectPidHits, hostHitRemotes: distinctRemotes, hostRemotePtr: ptrOf });
-  evidence('isolation-fingerprints.json', { prodDir, prodFiles: Object.keys(prodFpPost ?? {}).length, prodMutations, prodChanged: changed.concat(added), storeA: fA, storeB: fB, storeWt: fWt, memDir, acceptHome });
+  evidence('isolation-fingerprints.json', { prodDir, prodFiles: Object.keys(prodFpPost ?? {}).length, prodMutations, prodChanged: changed.concat(added), prodHandleHits, storeA: fA, storeB: fB, storeWt: fWt, memDir, acceptHome });
 }
 sink.close();
 
