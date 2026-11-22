@@ -32,7 +32,7 @@
 
 ## 冲突裁决接口（0.19.4）
 
-`POST /api/conflict/resolve`（viewer，owner-only）三档判定：`adopt`（旧条逻辑删除并记 superseded）、`keep`（记 related，内容不动）、`unrelated`（记 unrelated，不再提示）。加固项：判定白名单；裁决前重校验该对仍是规则候选（409 否决）；支持 `expected_old_version` 乐观并发；成功后写 `log.jsonl` 审计（`conflict_resolve`）。
+`POST /api/conflict/resolve`（viewer，owner-only）三档判定：`adopt`（旧条逻辑删除并记 superseded）、`keep`（记 related，内容不动）、`unrelated`（记 unrelated，不再提示）。加固项（0.19.5/0.19.6）：判定白名单；裁决前重校验该对仍是规则候选（409 否决）；**版本号必填**（缺失 400，`expected_old_version` / `expected_new_version` 任一过期 409）；版本校验与实际删除在**同一个 `BEGIN IMMEDIATE` 写锁事务**内完成（校验后提前提交的旧实现仍有竞态窗口，0.19.6 修正）；版本冲突返回 HTTP 409；成功后写 `log.jsonl` 审计（`conflict_resolve`）。
 
 ## 冲突扫描收紧（0.19.1）
 

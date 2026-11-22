@@ -754,9 +754,11 @@ http.createServer(async (req, res) => {
         if (expectNew !== newRow.version)
           return json({ ok: false, msg: `新条版本已变化（当前 v${newRow.version}），请刷新后重试` }, 409);
         if (verdict === "superseded") {
-          // 版本校验下沉：expected_version 由 memory_forget 在写锁事务内原子比对
+          // 版本校验下沉：expected_version 由 memory_forget 在写锁事务内原子比对；
+          // 版本冲突对客户端是 409（0.19.6 外审：失败不能伪装成 200）
           const r = await call("memory_forget", { id: oldRow.id, reason: "conflict-adopt", expected_version: oldRow.version });
-          if (!String(r).includes("OK")) return json({ ok: false, msg: String(r).slice(0, 120) });
+          const msg = String(r).slice(0, 140);
+          if (!r.includes("OK")) return json({ ok: false, msg }, msg.startsWith("VERSION_CONFLICT") ? 409 : 502);
           saveConflictReview(oldRow, newRow, verdict);
           auditViewer("conflict_resolve", { old: oldRow.id, new: newRow.id, verdict: "superseded" });
           return json({ ok: true, msg: "已采纳新说法，旧条转为历史（审计可查；默认召回不再返回）" });
@@ -812,6 +814,8 @@ http.createServer(async (req, res) => {
     }
     json({ error: "not found" }, 404);
   } catch (e) { json({ error: String(e.message) }, 500); }
-}).listen(PORT, "127.0.0.1", () => {
-  console.log(`lm-memory viewer → http://127.0.0.1:${PORT}  (dir: ${MEM_DIR})`);
+}).listen(PORT, "127.0.0.1", function () {
+  // PORT=0 时由 OS 分配实际端口（外审 P2-2：测试用动态端口，不再先占再放）
+  const actual = this.address().port;
+  console.log(`lm-memory viewer → http://127.0.0.1:${actual}  (dir: ${MEM_DIR})`);
 });

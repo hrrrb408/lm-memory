@@ -1093,42 +1093,51 @@ server.registerTool("memory_forget", {
   inputSchema: { id: z.number().int().positive(), reason: z.string().max(500).default(""), hard: z.boolean().default(false).describe("物理删除该行（含已休眠/已接棒的行），用于隐私擦除；默认 false 为可逆逻辑删除"),
     expected_version: z.number().int().positive().optional().describe("乐观并发：提供时与当前 version 不符则拒绝（0.19.5）") },
 }, async ({ id, reason, hard, expected_version }) => {
-  const any = db.prepare("SELECT id, kind, content, status FROM memories WHERE id=?").get(id);
-  if (!any) return ok(`ERROR: id=${id} 不存在。`);
-  if (Number.isSafeInteger(expected_version)) {
-    // 与写入同事务的原子校验：BEGIN IMMEDIATE 拿写锁后再比对，消除检查与删除之间的竞态窗口
+  // v0.19.6 外审 P1 修正：乐观版本校验必须与实际删除在【同一个 BEGIN IMMEDIATE
+  // 写锁事务】内完成。0.19.5 曾把校验单独开事务提前 COMMIT——写锁随即释放，
+  // 其他连接仍可在「校验后、删除前」改写记录，竞态窗口并未消除。
+  // 实现要点：BEGIN IMMEDIATE 拿写锁 → 事务内读最新行 → 比对 expected_version
+  // → 同一事务内执行删除/软删 → COMMIT。校验失败整事务回滚，不产生部分写入。
+  const wantVersion = Number.isSafeInteger(expected_version);
+  if (hard) {
+    // v0.15.1 擦除契约：按 id 物理擦除任何生命周期状态的行。只删此行（含 FTS 索引触发器联动），
+    // 不清理版本链其它行、队列文件、历史热流摘要。
     db.exec("BEGIN IMMEDIATE");
     try {
-      const fresh = db.prepare("SELECT version, status FROM memories WHERE id=?").get(id);
-      if (!fresh || fresh.version !== expected_version) { db.exec("ROLLBACK"); return ok(`VERSION_CONFLICT: id=${id} 当前 v${fresh?.version ?? "不存在"} ≠ 期望 v${expected_version}。请刷新后重试。`); }
-      db.exec("COMMIT");
-    } catch (e) { db.exec("ROLLBACK"); throw e; }
-  }
-  if (hard) {
-    // v0.15.1 擦除契约（复核实锤旧版 hard 被 active/dormant 过滤挡住）：按 id 物理擦除任何生命周期状态的行。
-    // 范围诚实声明：只删此行（含 FTS 索引，触发器联动）——不清理版本链其它行、队列文件、历史热流摘要。
-    db.exec("BEGIN");
-    try {
-      db.prepare("INSERT OR IGNORE INTO suppression VALUES (?,?)").run(contentHash(any.content), now());
+      const fresh = db.prepare("SELECT id, version, kind, content, status FROM memories WHERE id=?").get(id);
+      if (!fresh) { db.exec("ROLLBACK"); return ok(`ERROR: id=${id} 不存在。`); }
+      if (wantVersion && fresh.version !== expected_version) {
+        db.exec("ROLLBACK");
+        return ok(`VERSION_CONFLICT: id=${id} 当前 v${fresh.version} ≠ 期望 v${expected_version}。请刷新后重试。`);
+      }
+      db.prepare("INSERT OR IGNORE INTO suppression VALUES (?,?)").run(contentHash(fresh.content), now());
       db.prepare("DELETE FROM provenance WHERE memory_id=?").run(id);
       db.prepare('DELETE FROM corroboration WHERE memory_id=?').run(id);
       db.prepare('DELETE FROM validity WHERE memory_id=?').run(id);
       db.prepare("DELETE FROM memories WHERE id=?").run(id);
-      outboxInsert("forget", { id, kind: any.kind, reason: reason.slice(0, 80), hard: true, was: any.status }); // 删除事件不带原文（复核实锤）
+      outboxInsert("forget", { id, kind: fresh.kind, reason: reason.slice(0, 80), hard: true, was: fresh.status }); // 删除事件不带原文
       db.exec("COMMIT");
     } catch (e) { db.exec("ROLLBACK"); throw e; }
     flushOutbox();
-    audit("forget", { id, reason: reason.slice(0, 80), hard: true, was: any.status }); // 审计不含全文
+    audit("forget", { id, reason: reason.slice(0, 80), hard: true, was: "hard" }); // 审计不含全文
     regenerateCurrentMd(); rebuildEdgesSafe();
-    return ok(`OK: id=${id} 已物理擦除（原状态 ${any.status}）。范围：仅此行（版本链其它行/队列/历史热流摘要不在本次范围）。`);
+    return ok(`OK: id=${id} 已物理擦除。范围：仅此行（版本链其它行/队列/历史热流摘要不在本次范围）。`);
   }
-  if (any.status !== "active" && any.status !== "dormant")
-    return ok(`ERROR: id=${id} 状态为 ${any.status}（保留供审计）。如需物理擦除请携带 hard=true 重试。`);
-  db.exec("BEGIN");
+  db.exec("BEGIN IMMEDIATE");
   try {
-    db.prepare("INSERT OR IGNORE INTO suppression VALUES (?,?)").run(contentHash(any.content), now());
+    const fresh = db.prepare("SELECT id, version, kind, content, status FROM memories WHERE id=?").get(id);
+    if (!fresh) { db.exec("ROLLBACK"); return ok(`ERROR: id=${id} 不存在。`); }
+    if (wantVersion && fresh.version !== expected_version) {
+      db.exec("ROLLBACK");
+      return ok(`VERSION_CONFLICT: id=${id} 当前 v${fresh.version} ≠ 期望 v${expected_version}。请刷新后重试。`);
+    }
+    if (fresh.status !== "active" && fresh.status !== "dormant") {
+      db.exec("ROLLBACK");
+      return ok(`ERROR: id=${id} 状态为 ${fresh.status}（保留供审计）。如需物理擦除请携带 hard=true 重试。`);
+    }
+    db.prepare("INSERT OR IGNORE INTO suppression VALUES (?,?)").run(contentHash(fresh.content), now());
     db.prepare("UPDATE memories SET status='deleted', updated_at=? WHERE id=?").run(now(), id);
-    outboxInsert("forget", { id, kind: any.kind, reason: reason.slice(0, 80), status: "deleted" }); // v0.15.2：删除事件一律不带原文（复核收窄声明）
+    outboxInsert("forget", { id, kind: fresh.kind, reason: reason.slice(0, 80), status: "deleted" }); // 删除事件一律不带原文
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
   flushOutbox();

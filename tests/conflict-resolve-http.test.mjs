@@ -23,8 +23,15 @@ const PORT = await new Promise((resolve, reject) => {
   probe.once('error', reject);
   probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
 });
-const base = `http://127.0.0.1:${PORT}`;
-const post = (p, body) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+let base = `http://127.0.0.1:${PORT}`; // 测试内会改写为 viewer 的实际端口（PORT=0）
+const post = (p, body, timeoutMs) => fetch(base + p, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+  signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+}).then(
+  r => r,
+  e => ({ timedOut: e.name === 'TimeoutError', status: 0, json: async () => ({}) }),
+);
 
 test('conflict resolve endpoint: whitelist, re-check, optimistic version, audit', async t => {
   const dir = mkdtempSync(path.join(tmpdir(), 'lm-resolve-e2e-'));
@@ -68,17 +75,29 @@ test('conflict resolve endpoint: whitelist, re-check, optimistic version, audit'
   setEmb(newId, [0, 1, 0]);
   dbw.close();
 
-  const viewer = spawn(process.execPath, [path.join(root, 'server/viewer.mjs'), String(PORT)], {
+  // 外审 P2-2：PORT=0 由 OS 分配，从 viewer stdout 解析实际端口
+  const viewer = spawn(process.execPath, [path.join(root, 'server/viewer.mjs'), '0'], {
     env: { ...process.env, LM_MEMORY_DIR: dir, LM_EMBED: '0', LM_REMOTE_DISABLED: '1' },
-    stdio: ['ignore', 'ignore', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   t.after(() => viewer.kill());
+  const stdout = [], stderrText = [];
+  let viewerBase = null; // PORT=0：以 stdout 里 viewer 自己回报的端口为准
+  viewer.stdout.on('data', chunk => {
+    stdout.push(String(chunk));
+    const m = String(chunk).match(/http:\/\/127\.0\.0\.1:(\d+)/);
+    if (m && !viewerBase) viewerBase = `http://127.0.0.1:${m[1]}`;
+  });
+  viewer.stderr.on('data', chunk => stderrText.push(String(chunk)));
+  for (let i = 0; i < 40 && !viewerBase; i++) await new Promise(r => setTimeout(r, 250));
+  assert.ok(viewerBase, `viewer must report its port: ${stdout.join('')}`);
+  base = viewerBase;
   let up = false;
   for (let i = 0; i < 40 && !up; i++) {
-    await new Promise(r => setTimeout(r, 250));
     up = await fetch(base + '/api/version').then(r => r.ok, () => false);
+    if (!up) await new Promise(r => setTimeout(r, 250));
   }
-  assert.ok(up, 'viewer must start');
+  assert.ok(up, `viewer must start (base=${base}, stderr=${stderrText.join('').slice(0, 200)})`);
 
   const list = await (await fetch(base + '/api/conflicts')).json();
   const pair = list.pairs.find(p => (p.old.id === oldId && p.new.id === newId) || (p.old.id === newId && p.new.id === oldId));
@@ -117,11 +136,28 @@ test('conflict resolve endpoint: whitelist, re-check, optimistic version, audit'
   const freshPair = refreshed.pairs.find(p => [p.old.id, p.new.id].includes(lo.id) && [p.old.id, p.new.id].includes(hi.id));
   assert.ok(freshPair, '409 后候选仍在，可刷新重试');
   assert.equal(freshPair.new.version, hi.version + 1, 'clip 携带最新 version');
+  // 外审补充：另一连接持未提交写锁时，裁决的版本校验与后续写入必须共用同一把写锁——
+  // 锁被占用期间请求不得静默成功（挂起或快速失败均可，但绝不能 OK），释放后重试成功。
+  const blocker = new DatabaseSync(path.join(dir, 'memory.db'));
+  blocker.exec('BEGIN IMMEDIATE');
+  blocker.prepare('UPDATE memories SET version = version + 1 WHERE id = ?').run(lo.id);
+  const held = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'keep', expected_old_version: lo.version, expected_new_version: hi.version + 1 }, 1200);
+  assert.notEqual(held.status, 200, '锁被占用时裁决不得返回成功');
+  blocker.exec('ROLLBACK');
+  // 挂起的请求在锁释放后会滞后完成（写一条 keep 审计），等它落定再继续
+  await new Promise(r => setTimeout(r, 500));
+  blocker.close();
+  const afterLock = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'keep', expected_old_version: lo.version, expected_new_version: hi.version + 1 });
+  assert.equal(afterLock.status, 200);
+  assert.equal((await afterLock.json()).ok, true);
+
+  // adopt: deletes old row（新条已在前面被 +1，用刷新后的版本裁决）
   const adopt = await post('/api/conflict/resolve', { old: lo.id, new: hi.id, verdict: 'adopt', expected_old_version: lo.version, expected_new_version: hi.version + 1 });
   assert.equal(adopt.status, 200);
+  assert.equal((await adopt.json()).ok, true);
   const audit = await (await fetch(base + '/api/audit')).json();
   const resolved = audit.rows.filter(r => r.op === 'conflict_resolve');
-  assert.equal(resolved.length, 2, 'both verdicts audited');
+  assert.equal(resolved.length, 4, 'all successful resolves audited (含锁释放后滞后完成的挂起请求)');
   const dormant = await (await fetch(`${base}/api/dormant`)).json();
   assert.equal(dormant.total, 0);
 });
