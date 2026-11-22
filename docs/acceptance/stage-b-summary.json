@@ -1,0 +1,14 @@
+{
+  "pluginVersion": "0.19.7",
+  "tgzSha": "7eb21a84d99f8b68e614c777b4e051bfb5c4874136841c291fb48d723277f127",
+  "generated": "2026-11-22T06:31:07.402Z",
+  "env": {
+    "node": "v26.13.1",
+    "dsh": "0.2.2-rc.5",
+    "memDir": "/tmp/lm-stageb/dsh-home/data/memory",
+    "isolated": "CHECK"
+  },
+  "total": 38,
+  "pass": 38,
+  "fail": 0
+}
