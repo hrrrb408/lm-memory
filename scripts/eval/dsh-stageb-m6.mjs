@@ -1,11 +1,14 @@
 // 阶段 B · M6 实机验证：任务自动召回（显式开启 + 会话白名单）
 // 在阶段 B 隔离环境内：真实 DSH headless 会话 ×2（A 项目续聊 + B 项目对照），
 // 验证：指针注入、事件留痕（无用户文本）、非白名单会话不触发。
+// 外审 P1-1 修复：报告绑定 pluginVersion/tgzSha/执行时间（证据必须属于"本次运行 × 本安装包"）；
+// 复用严格布尔记录器（scripts/eval/lib/stageb-record.mjs）。主 runner 会以相同 acceptHome/tgz/reportDir 当场重跑本脚本。
 // 前置：dsh-stageb.mjs 已跑过（accept profile 内已装插件、仓库 A/B 已建）。
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRecorder } from './lib/stageb-record.mjs';
 import { fileURLToPath } from 'node:url';
 
 const [acceptHome, tgz, reportDir] = process.argv.slice(2);
@@ -13,12 +16,15 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const node = process.execPath;
 const DSH_NODE = process.env.DSH_NODE_EXECUTABLE;
 const DSH_INSTALL_DIR = process.env.DSH_INSTALL_DIR;
-assert.ok(acceptHome && DSH_NODE && DSH_INSTALL_DIR, '需要阶段 B 环境（acceptHome / DSH_NODE_EXECUTABLE / DSH_INSTALL_DIR）');
+assert.ok(acceptHome && tgz && reportDir && DSH_NODE && DSH_INSTALL_DIR, '需要阶段 B 环境（acceptHome / tgz / reportDir / DSH_NODE_EXECUTABLE / DSH_INSTALL_DIR）');
 assert.ok(fs.existsSync(acceptHome + '/profiles/accept/package.json'), 'accept profile 未初始化，先跑 dsh-stageb.mjs');
 const memDir = path.join(acceptHome, 'data/memory');
 const repos = { A: path.join(acceptHome, 'repos/a'), B: path.join(acceptHome, 'repos/b') };
 const modDir = path.join(acceptHome, 'profiles/accept/node_modules/dsh-lm-memory');
 fs.mkdirSync(reportDir, { recursive: true });
+const pluginVersion = JSON.parse(fs.readFileSync(path.join(modDir, 'package.json'), 'utf8')).version;
+const tgzSha = execFileSync('shasum', ['-a', '256', tgz]).toString().split(' ')[0];
+const startedAt = new Date().toISOString();
 
 async function startStub(planFile, logFile) {
   const { createServer } = await import('node:http');
@@ -102,14 +108,20 @@ const spawnOut = (cmd, args, opts) => new Promise((resolve, reject) => {
   p.on('close', code => code === 0 ? resolve({ stdout: out }) : reject(new Error(`exit ${code}: ${out.slice(-300)}`)));
 });
 
-const report = [];
-const record = (name, expected, actual, pass) => { report.push({ name, expected, actual, pass }); console.log(`${pass ? 'PASS' : 'FAIL'} ${name} — ${actual}`); };
+const { record: rec6, report } = createRecorder();
+const record = (name, expected, actual, pass) => rec6('M6', name, expected, actual, pass);
 
 // 回合 1：建立锚点记忆，拿 session id
 const turn1 = await dshTurn({ cwd: repos.A, prompt: 'M6 建立锚点。' });
 const sid = turn1.sessionId;
-assert.ok(/^session-[a-f\d-]{36}$/.test(sid ?? ''), 'session id 缺失');
-record('回合 1', '锚点记忆写入 + 取得 session id', `sid=${sid.slice(0, 18)}…`, true);
+const sidOk = /^session-[a-f\d-]{36}$/.test(sid ?? '');
+assert.ok(sidOk, 'session id 缺失');
+// 锚点副作用 DB 级核验：stub 首请求确实调用了 memory_remember 且内容落进 A 项目库
+import { DatabaseSync } from 'node:sqlite';
+const anchorDb = new DatabaseSync(path.join(storeA, 'memory.db'), { readOnly: true });
+const anchorInDb = !!anchorDb.prepare("SELECT 1 FROM memories WHERE status='active' AND content LIKE '%STAGEB-M6%' LIMIT 1").get();
+anchorDb.close();
+record('回合 1', '锚点写入项目库（DB 级）+ 取得 session id', `sid=${String(sid).slice(0, 18)}… 有效=${sidOk} 锚点落库=${anchorInDb}`, sidOk && anchorInDb);
 // 事件留痕：记录本次运行前已有的 pointer 行数（幂等：复用环境时旧事件保留）
 const evPath = path.join(storeA, 'task-recall-events.jsonl');
 const pointerRowsBefore = fs.existsSync(evPath)
@@ -142,10 +154,15 @@ record('回合 3', '未列入白名单的会话不触发', turn3.stubInjected ? 
 
 // 汇总
 const pass = report.filter(r => r.pass).length;
+const finishedAt = new Date().toISOString();
 fs.writeFileSync(path.join(reportDir, 'stage-b-m6-optin.json'), JSON.stringify({
-  generated: new Date().toISOString(), sessionId: sid, storeA, storeB, total: report.length, pass, fail: report.length - pass, report,
+  generated: finishedAt, startedAt, pluginVersion, tgzSha,
+  sessionId: sid, storeA, storeB, total: report.length, pass, fail: report.length - pass, report,
 }, null, 2));
-const md = ['# M6 实机自动召回验证（阶段 B 补充）', '', `- 会话：${sid}`, `- 白名单内回溯提问：${pointerIn2 ? '注入候选指针' : '未注入'}`,
+const md = ['# M6 实机自动召回验证（阶段 B 补充，随主验收当场重跑）', '',
+  `- 插件版本：${pluginVersion}（tgz sha256 ${tgzSha.slice(0, 16)}…）`,
+  `- 执行：${startedAt} → ${finishedAt}`,
+  `- 会话：${sid}`, `- 白名单内回溯提问：${pointerIn2 ? '注入候选指针' : '未注入'}`,
   `- 事件留痕：pointer 行 +1，仅含会话/编号/结果`,
   `- 非白名单会话：未触发`, `- 事件文件不含用户提问原文`, '', `**结果：${pass}/${report.length} PASS**`];
 fs.writeFileSync(path.join(reportDir, 'stage-b-m6-optin.md'), md.join('\n'));

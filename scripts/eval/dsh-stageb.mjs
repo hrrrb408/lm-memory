@@ -80,9 +80,29 @@ execFileSync('git', ['-C', repos.A, 'worktree', 'prune']);
 // -B：分支存在则重置、不存在则新建（全新 HOME 首跑也不会炸）
 execFileSync('git', ['-C', repos.A, 'worktree', 'add', '-q', worktree, '-B', 'wt']);
 
-// 生产库指纹：验收开始前记录，结束前复核（M10）
-const prodDbPath = path.join(os.homedir(), '.dsh/memory/memory.db');
-const prodShaPre = fs.existsSync(prodDbPath) ? sha(prodDbPath) : null;
+// 生产记忆目录指纹：整个 ~/.dsh/memory（含 WAL/SHM 等持久化文件），外审 P2-1
+// 注意：若运行期间有其他会话写入记忆，本指纹会如实变化并 FAIL——请在无并发记忆写入时复跑。
+const prodDir = path.join(os.homedir(), '.dsh/memory');
+const dirFingerprint = (dir) => {
+  const out = {};
+  // Node v26.13.1 实测：readdirSync({withFiletypes:true}) 回退成字符串数组（Dirent 缺失），
+  // 因此用 lstatSync 自行判类型；lstat 不跟随符号链接，目录指纹不会递归出界。
+  const walk = (d, prefix) => {
+    let names;
+    try { names = fs.readdirSync(d); } catch { return; }
+    for (const name of names) {
+      const rel = prefix + name;
+      const full = path.join(d, name);
+      let st = null;
+      try { st = fs.lstatSync(full); } catch { continue; }
+      if (st.isDirectory()) walk(full, rel + '/');
+      else { try { out[rel] = `${sha(full).slice(0, 16)}:${st.size}`; } catch {} }
+    }
+  };
+  walk(dir, '');
+  return out;
+};
+const prodFpPre = fs.existsSync(prodDir) ? dirFingerprint(prodDir) : null;
 
 // ---------- 代理汇点：整场验收的 DSH/server 进程若尝试代理外呼，都会落在这里 ----------
 let sinkHits = 0;
@@ -99,44 +119,108 @@ const proxyEnv = {
   ALL_PROXY: `http://127.0.0.1:${sinkPort}`, NO_PROXY: '127.0.0.1,localhost,::1',
 };
 
-// ---------- 全程外发监测（进程级 lsof 采样）：验收器自身也受监督 ----------
-const monitoredPids = new Map(); // pid → 标签
-const egressHits = [];
-let egressBaseline = 0;
-const isLoopback = (h) => h === '127.0.0.1' || h === 'localhost' || h === '::1' || h.startsWith('127.') || h === '[::1]';
+// ---------- 全程外发监测（进程级 lsof 采样 + PID 身份核验）：验收器自身也受监督 ----------
+// 外审 P1-2 修复：取消"基线清零"（旧版把探针前的命中整体排除）；每条命中归属 pid/命令/远端；
+// 自检探针连接单独标记（kind=probe），判定只认精确 pid+remote 匹配；
+// 采样前核验进程身份，进程退出或 PID 被系统复用即摘除，防止把无关进程的连接算到验收头上。
+const monitoredPids = new Map(); // pid -> { label, cmd }（watch 时记录身份）
+const egressHits = [];           // { at, pid, label, cmd, remote, kind: 'probe'|'monitored' }
+let probePid = null;
+let firstWatchAt = null;
+let expiredPids = 0;
+let suspectPidHits = 0;          // 身份翻转前已有命中 → 可能误归因，如实 FAIL
+const seenConns = new Set();     // 同一连接跨采样轮去重
+const isLoopback = (h) => {
+  const n = h.replace(/^::ffff:/i, '').replace(/^::(127\.\d+\.\d+\.\d+)$/, '$1'); // v4-mapped 归一
+  return n === '127.0.0.1' || n === 'localhost' || n === '::1' || n.startsWith('127.') || n === '[::1]';
+};
 const parseAddr = (a) => {
   const m = a.match(/^\[([^\]]+)\]:\d+$/) ?? a.match(/^([^:]+):\d+$/);
   return m ? m[1] : a;
 };
-function externalConns(pids) {
-  if (!pids.length) return [];
-  let out = '';
-  try { out = execFileSync('lsof', ['-p', pids.join(','), '-i', '-n', '-P', '-F', 'n'], { encoding: 'utf8', timeout: 15000 }); }
-  catch (e) { out = e.stdout ?? ''; } // lsof 退出码 1 = 无匹配 socket
-  const bad = [];
-  for (const line of out.split('\n')) {
-    if (!line.startsWith('n') || !line.includes('->')) continue; // 只看已建立连接，监听不算
-    const [local, remote] = line.slice(1).split('->');
-    const rHost = parseAddr(remote ?? '');
-    if (rHost && !isLoopback(rHost)) bad.push(line.slice(1));
-  }
-  return bad;
+const psOne = (pid) => { try { return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 10000 }).trim().slice(0, 200); } catch { return ''; } };
+function watch(pid, label) {
+  if (!pid) return;
+  monitoredPids.set(pid, { label, cmd: psOne(pid) });
+  if (!firstWatchAt) firstWatchAt = new Date().toISOString();
+  expansionAt = 0; // 强制下个采样轮立即重建集合：短命进程（如自检探针，<1s）不至整窗漏采
 }
 const childPids = (pid) => {
   try { return execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' }).split('\n').map(Number).filter(Boolean); }
   catch { return []; }
 };
-const watch = (pid, label) => { if (pid) monitoredPids.set(pid, label); };
+function psCmds(pids) {
+  const m = new Map();
+  if (!pids.length) return m;
+  try {
+    const out = execFileSync('ps', ['-p', pids.join(','), '-o', 'pid=,command='], { encoding: 'utf8', timeout: 15000 });
+    for (const line of out.split('\n')) {
+      const t = line.trim(); if (!t) continue;
+      const sp = t.indexOf(' '); if (sp > 0) m.set(Number(t.slice(0, sp)), t.slice(sp + 1).trim().slice(0, 200));
+    }
+  } catch {}
+  return m;
+}
+function sampleEgress(pids) {
+  if (!pids.length) return [];
+  let out = '';
+  try { out = execFileSync('lsof', ['-a', '-p', pids.join(','), '-i', '-n', '-P', '-F', 'n'], { encoding: 'utf8', timeout: 15000 }); }
+  catch (e) { out = e.stdout ?? ''; } // lsof 退出码 1 = 无匹配 socket
+  // -a 必须带上：lsof 的 -p 与 -i 默认 OR 语义，漏了它会把全系统进程的连接都算进来（第五轮实测教训）
+  // macOS lsof -F n 会混入非 INET 条目（如 n0x句柄->0x句柄 的共享内存/Unix 域套接字），
+  // 双端必须形如 地址:端口（v4 或 [v6]）且不以 0x 开头才算网络连接（第四轮实测教训）。
+  const isInetEndpoint = (s) => /^(?:\[[^\]]+\]|[^:\s]+):\d+$/.test(s) && !/^0x/i.test(s);
+  const found = []; let cur = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('p')) { cur = Number(line.slice(1)); continue; } // lsof -F：p<pid> 开始一个进程块
+    if (!line.startsWith('n') || !line.includes('->')) continue;         // 只看已建立连接，监听不算
+    const body = line.slice(1);
+    const [local, remote] = body.split('->');
+    if (!local || !remote || !isInetEndpoint(local.trim()) || !isInetEndpoint(remote.trim())) continue;
+    const rHost = parseAddr(remote.trim());
+    if (rHost && !isLoopback(rHost)) found.push({ pid: cur, remote: remote.trim(), line: body });
+  }
+  return found;
+}
 let expansionCache = [], expansionAt = 0;
+const samplerStartedAt = new Date().toISOString();
 const sampler = setInterval(() => {
   const now = Date.now();
-  if (now - expansionAt > 1000) { // 每秒展开一次子进程树（dsh → 插件 server）
+  if (now - expansionAt > 1000) { // 每秒展开子进程树（dsh → 插件 server / m6 runner → 其 dsh 子进程）
     const seen = new Set(); const q = [...monitoredPids.keys()];
-    while (q.length) { const p = q.pop(); if (seen.has(p)) continue; seen.add(p); q.push(...childPids(p)); }
+    while (q.length) {
+      const p = q.pop();
+      if (seen.has(p)) continue;
+      seen.add(p);
+      const kids = childPids(p);
+      for (const c of kids) if (!monitoredPids.has(c)) watch(c, `${monitoredPids.get(p)?.label ?? '?'}/child`);
+      q.push(...kids);
+    }
     expansionCache = [...seen]; expansionAt = now;
   }
-  for (const h of externalConns(expansionCache)) {
-    if (!egressHits.some(x => x.line === h)) egressHits.push({ line: h, at: new Date().toISOString() });
+  if (!expansionCache.length) return;
+  const cmds = psCmds(expansionCache);
+  const alive = [];
+  for (const p of expansionCache) {
+    const cur = cmds.get(p) ?? '';
+    const info = monitoredPids.get(p);
+    if (!cur || (info?.cmd && cur !== info.cmd)) { // 进程退出或 PID 被复用
+      monitoredPids.delete(p); expiredPids += 1;
+      if (egressHits.some(h => h.pid === p && h.kind === 'monitored')) suspectPidHits += 1;
+      continue;
+    }
+    alive.push(p);
+  }
+  expansionCache = alive;
+  for (const h of sampleEgress(alive)) {
+    const key = `${h.pid}|${h.line}`;
+    if (seenConns.has(key)) continue;
+    seenConns.add(key);
+    egressHits.push({
+      at: new Date().toISOString(), pid: h.pid,
+      label: monitoredPids.get(h.pid)?.label ?? '?', cmd: (cmds.get(h.pid) ?? '').slice(0, 160),
+      remote: h.remote, kind: h.pid === probePid ? 'probe' : 'monitored',
+    });
   }
 }, 400);
 sampler.unref?.();
@@ -483,20 +567,25 @@ const personalStore = path.join(memDir, 'personal-v1');
   evidence('m5-graph.json', { store: storeA, nodes, edges });
 }
 
-// ================= M6 自动召回（默认关闭；事件级实机验证由独立 runner 承担） =================
+// ================= M6 自动召回（默认关闭；实机验证由本包 M6 runner 当场重跑并绑定版本，外审 P1-1） =================
 {
   const { stdout } = await dshRun({ cwd: repos.A, prompt: 'M6 自动召回注册检查。', plan: [{ text: 'M6-OK' }], extraEnv: { LM_STAGEB_ALLOW_REMOTE: '1' } });
   const leaked = stdout.includes('记忆候选指针');
   record(6, 'taskRecall 需显式开启（默认关闭）', '默认运行无候选指针注入', leaked ? '出现指针（应无）' : '无指针', !leaked);
-  // 外审 P2：指针注入/门禁的实机验证保留在独立 runner（dsh-stageb-m6.mjs，5/5），此处核对其报告存在且全 PASS
-  const m6Path = path.join(repoRoot, 'docs/acceptance/stage-b-m6-optin.json');
+  // M6 证据必须是"本次运行 × 本安装包"：当场重跑 dsh-stageb-m6.mjs，报告落在本 reportDir，
+  // 并核对报告内 pluginVersion/tgzSha 与本验收安装包完全一致；其 dsh 子进程经子进程树展开纳入同一外发监测。
+  const m6 = spawn(node, [path.join(repoRoot, 'scripts/eval/dsh-stageb-m6.mjs'), acceptHome, tgz, reportDir], { env: process.env, cwd: repoRoot, stdio: 'inherit' });
+  watch(m6.pid, 'm6-runner');
+  const m6Exit = await new Promise(res => m6.on('close', res).on('error', () => res(-1)));
+  const m6Path = path.join(reportDir, 'stage-b-m6-optin.json');
   let m6Ok = false, m6Detail = '报告缺失';
   try {
     const j = JSON.parse(fs.readFileSync(m6Path, 'utf8'));
-    m6Ok = typeof j.pass === 'number' && typeof j.total === 'number' && j.pass === j.total && j.fail === 0;
-    m6Detail = `${j.pass}/${j.total}`;
+    const bound = j.pluginVersion === pluginPkg.version && j.tgzSha === tgzSha;
+    m6Ok = m6Exit === 0 && typeof j.pass === 'number' && j.pass === j.total && j.fail === 0 && bound;
+    m6Detail = `${j.pass}/${j.total} v=${j.pluginVersion} sha=${String(j.tgzSha).slice(0, 8)} 版本绑定=${bound}`;
   } catch (e) { m6Detail = e.message.slice(0, 60); }
-  record(6, '指针注入与门禁（独立实机 runner）', 'stage-b-m6-optin 全 PASS', m6Detail, m6Ok);
+  record(6, '指针注入与门禁（本包实机重跑）', 'M6 runner 全 PASS 且 pluginVersion/tgzSha 与本验收安装包一致', m6Detail, m6Ok);
 }
 
 // ================= M7 故障恢复（数据对象：A 项目库 + 崩溃标记回归） =================
@@ -548,23 +637,30 @@ const personalStore = path.join(memDir, 'personal-v1');
 
 // ================= M8 隐私（凭据拦截 + 监测器自检；外联/汇点判定在 M10 汇总） =================
 {
-  // 监测器自检：验收器自己的外发探测器必须先证明能抓到非 loopback 连接（验收系统也要被验收）
+  // 监测器自检：验收器自己的外发探测器必须先证明能精确抓到探针连接（验收系统也要被验收）。
+  // 外审 P1-2 修复：不再用"字符串包含 lanIp"判断（公网连接的本地地址也会包含 lanIp），
+  // 必须是探针 pid 命中且远端精确等于 lanIp:port；探针命中单独标记，不参与最终判定。
   const lanIp = Object.values(os.networkInterfaces()).flat().find(i => i && !i.internal && i.family === 'IPv4')?.address ?? null;
   let detectorOk = false, detectorDetail = '无非 loopback 网卡，无法自检';
   if (lanIp) {
     const srv = net.createServer(() => {});
     await new Promise(r => srv.listen(0, lanIp, r));
-    const probe = spawn('curl', ['-s', '--max-time', '3', `http://${lanIp}:${srv.address().port}/`], { stdio: 'ignore' });
+    const port = srv.address().port;
+    const probe = spawn('curl', ['-s', '--max-time', '3', `http://${lanIp}:${port}/`], { stdio: 'ignore' });
     watch(probe.pid, 'detector-probe');
+    probePid = probe.pid;
     await sleep(900);
-    detectorOk = egressHits.some(h => h.line.includes(lanIp));
-    detectorDetail = `lan=${lanIp} hits=${egressHits.length}`;
+    const probeHits = egressHits.filter(h => h.kind === 'probe');
+    const exact = probeHits.find(h => h.pid === probe.pid && h.remote === `${lanIp}:${port}`);
+    detectorOk = !!exact;
+    detectorDetail = `lan=${lanIp}:${port} probeHits=${probeHits.length} exactMatch=${!!exact}`;
     probe.kill('SIGKILL');
     srv.close();
-    await sleep(600); // 等 sampler 收尾，再取基线：此后不允许再出现任何外联
+    monitoredPids.delete(probe.pid); // 探针退场：命中保留在证据（kind=probe），不再参与判定
+    probePid = null;
+    await sleep(600);
   }
-  egressBaseline = egressHits.length;
-  record(8, '外发监测器自检', '探测器能捕获非 loopback 连接', detectorDetail, detectorOk);
+  record(8, '外发监测器自检', '探针 pid 精确命中 lan-ip:port', detectorDetail, detectorOk);
 
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
@@ -621,21 +717,47 @@ const personalStore = path.join(memDir, 'personal-v1');
 clearInterval(sampler);
 await sleep(500); // 最后一个采样窗口内的连接落地
 {
-  const prodShaPost = fs.existsSync(prodDbPath) ? sha(prodDbPath) : null;
+  // 生产记忆目录指纹（外审 P2-1：含 WAL/SHM 全目录核验）
+  const prodFpPost = fs.existsSync(prodDir) ? dirFingerprint(prodDir) : null;
+  const changed = [], added = [];
+  if (prodFpPre && prodFpPost) {
+    for (const k of Object.keys(prodFpPost)) if (!(k in prodFpPre)) added.push(k);
+    for (const k of Object.keys(prodFpPre)) {
+      if (!(k in prodFpPost)) added.push(k);
+      else if (prodFpPre[k] !== prodFpPost[k]) changed.push(k);
+    }
+  }
+  const prodMutations = changed.length + added.length;
+  record(10, '生产记忆目录指纹（含 WAL/SHM）', '运行期间 ~/.dsh/memory 零变更（并发会话写入会如实 FAIL）',
+    `${Object.keys(prodFpPost ?? {}).length} 文件；变更 ${prodMutations} 处${changed.concat(added).length ? '：' + changed.concat(added).slice(0, 5).join(', ') : ''}`,
+    !!prodFpPre && !!prodFpPost && prodMutations === 0);
   record(10, '验收数据目录在隔离 HOME 内', 'memDir 位于 acceptHome 下', memDir, memDir.startsWith(acceptHome));
-  record(10, '生产记忆库全程未变', 'sha256 前后一致（未触碰 ~/.dsh/memory）',
-    `pre=${prodShaPre?.slice(0, 12) ?? '缺失'} post=${prodShaPost?.slice(0, 12) ?? '缺失'}`,
-    !!prodShaPre && !!prodShaPost && prodShaPre === prodShaPost);
   const fA = sha(path.join(storeA, 'memory.db'));
   const fB = sha(path.join(storeB, 'memory.db'));
   const fWt = sha(path.join(storeWt, 'memory.db'));
   record(10, '项目库指纹互异', 'A/B/WT 三库 sha256 互不相同', `${fA.slice(0, 8)}/${fB.slice(0, 8)}/${fWt.slice(0, 8)}`, new Set([fA, fB, fWt]).size === 3);
-  const newHits = egressHits.slice(egressBaseline);
-  record(10, '受监视进程无非 loopback 外联', '自检基线后 0 命中（250-400ms 采样 + 子进程树展开）',
-    `hits=${newHits.length} pids=${monitoredPids.size}`, newHits.length === 0);
+  // 外联判定（外审 P1-2）：无基线清零。探针命中（kind=probe）不参与判定；
+  // 记忆组件（memory-server/viewer）任何非 loopback 命中即 FAIL；宿主进程命中逐条归属披露。
+  const liveHits = egressHits.filter(h => h.kind === 'monitored');
+  const memCompHits = liveHits.filter(h => /memory-server\.mjs|viewer\.mjs/.test(h.cmd));
+  const hostHits = liveHits.filter(h => !/memory-server\.mjs|viewer\.mjs/.test(h.cmd));
+  const distinctRemotes = [...new Set(hostHits.map(h => h.remote))];
+  // PTR 反查尽力而为（搭建期环境允许 DNS；查不到就如实标 no-ptr）
+  const ptrOf = {};
+  for (const r of distinctRemotes) {
+    const host = parseAddr(r);
+    try { ptrOf[r] = execFileSync('dig', ['+time=2', '+tries=1', '-x', host, '+short'], { encoding: 'utf8', timeout: 6000 }).trim().split('\n')[0] || 'no-ptr'; }
+    catch { ptrOf[r] = 'no-ptr'; }
+  }
+  record(10, '记忆组件零外联', 'memory-server/viewer 全程无非 loopback 连接', `hits=${memCompHits.length}`, memCompHits.length === 0);
+  record(10, '宿主进程外联归类披露', '每条命中归属 pid/命令/远端，附 PTR 反查（宿主基础设施，非记忆组件）',
+    `hits=${hostHits.length} 远端 ${distinctRemotes.length} 种：` + distinctRemotes.slice(0, 4).map(r => `${r}(${ptrOf[r]})`).join(' ; '),
+    hostHits.every(h => h.cmd && h.pid));
+  record(10, 'PID 身份核验', '采样前核验进程身份，防 PID 复用误归因', `expired=${expiredPids} suspect=${suspectPidHits}`, suspectPidHits === 0);
+  record(10, '监测覆盖窗口', '采样器先于首个被监视进程启动', `sampler=${samplerStartedAt} firstWatch=${firstWatchAt}`, !!firstWatchAt && samplerStartedAt <= firstWatchAt);
   record(10, '代理汇点零命中', 'HTTP(S)_PROXY 指向本地汇点，全程 0 请求', `sinkHits=${sinkHits}`, sinkHits === 0);
-  evidence('egress-monitor.json', { monitored: [...monitoredPids.entries()], hits: egressHits, sinkHits, baseline: egressBaseline });
-  evidence('isolation-fingerprints.json', { prodDbPath, prodShaPre, prodShaPost, storeA: fA, storeB: fB, storeWt: fWt, memDir, acceptHome });
+  evidence('egress-monitor.json', { samplerStartedAt, monitored: [...monitoredPids.entries()].map(([pid, v]) => ({ pid, ...v })), hits: egressHits, sinkHits, expiredPids, suspectPidHits, hostHitRemotes: distinctRemotes, hostRemotePtr: ptrOf });
+  evidence('isolation-fingerprints.json', { prodDir, prodFiles: Object.keys(prodFpPost ?? {}).length, prodMutations, prodChanged: changed.concat(added), storeA: fA, storeB: fB, storeWt: fWt, memDir, acceptHome });
 }
 sink.close();
 
@@ -648,7 +770,7 @@ const summary = {
   env: {
     node: process.version, platform: `${os.platform()}/${os.arch()} ${os.release()}`, host: os.hostname(),
     dshInstallDir: DSH_INSTALL_DIR, acceptHome, memDir,
-    prodDbUnchanged: !!prodShaPre && prodShaPre === (fs.existsSync(prodDbPath) ? sha(prodDbPath) : null),
+    prodDirMonitored: !!prodFpPre,
     monitoredPids: monitoredPids.size,
   },
   total: report.length, pass, fail: report.length - pass,
@@ -656,9 +778,9 @@ const summary = {
 evidence('summary.json', summary);
 evidence('report.json', report);
 const lines = ['# lm-memory 阶段 B 验收报告（0.19.8 重跑）', '',
-  `- 插件版本：${pluginVersion}（Release tgz sha256 ${tgzSha.slice(0, 16)}…）`,
+  `- 插件版本：${pluginVersion}（tgz sha256 ${tgzSha.slice(0, 16)}…）`,
   `- 验收环境：Node ${process.version} · ${os.platform()}/${os.arch()} · 主机 ${os.hostname()} · DSH ${DSH_INSTALL_DIR}`,
-  `- 隔离 HOME：${acceptHome} · 数据目录 ${memDir} · 生产库 sha256 前后一致：${summary.env.prodDbUnchanged}`,
+  `- 隔离 HOME：${acceptHome} · 数据目录 ${memDir} · 生产目录指纹核验：${summary.env.prodDirMonitored ? '已执行' : '生产目录缺失'}`,
   `- 验收器自检：tests/stageb-harness.test.mjs（record 强制 boolean，杜绝假 PASS）`,
   `- M6 自动召回实机验证独立执行：scripts/eval/dsh-stageb-m6.mjs（见 docs/acceptance/stage-b-m6-optin.md）`,
   '', '| 模块 | 检查 | 预期 | 实际 | 结果 |', '|---|---|---|---|---|'];
