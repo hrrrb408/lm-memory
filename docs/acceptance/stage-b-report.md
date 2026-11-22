@@ -10,6 +10,8 @@
 
 复现方式：`node scripts/eval/dsh-stageb.mjs <accept-home> <release.tgz> <report-dir>`
 
+M6 补充：自动召回的实机验证由 `scripts/eval/dsh-stageb-m6.mjs` 单独执行（显式开启 + 会话白名单 + 续聊），5/5 PASS，证据见 `stage-b-m6-optin.md`。M6 仍默认关闭，门禁未达标。
+
 
 
 - 插件版本：0.19.7（Release tgz sha256 7eb21a84d99f8b68…）

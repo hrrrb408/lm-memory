@@ -1,0 +1,41 @@
+{
+  "generated": "2026-11-22T12:01:00.214Z",
+  "sessionId": "session-90980b49-b14c-48bb-a867-03f16bf310cb",
+  "storeA": "/tmp/lm-stageb/dsh-home/data/memory/projects-v1/f76a050ffe5129dc02a78ed2430163a79dc6c407694b8c17e14bf0044a8ed3a2",
+  "storeB": "/tmp/lm-stageb/dsh-home/data/memory/projects-v1/41bc4c8f2b992d2d20fcce6360962b44ea5c19e01bff1e0b5d912f555ecb4d2f",
+  "total": 5,
+  "pass": 5,
+  "fail": 0,
+  "report": [
+    {
+      "name": "回合 1",
+      "expected": "锚点记忆写入 + 取得 session id",
+      "actual": "sid=session-90980b49-b…",
+      "pass": true
+    },
+    {
+      "name": "回合 2",
+      "expected": "白名单会话出现候选指针（请求侧注入证据）",
+      "actual": "指针已注入模型请求",
+      "pass": true
+    },
+    {
+      "name": "事件留痕",
+      "expected": "本次运行新增 pointer 行且不含用户文本",
+      "actual": "新增 1 行",
+      "pass": true
+    },
+    {
+      "name": "隐私边界",
+      "expected": "事件文件不含提问原文",
+      "actual": "无用户文本",
+      "pass": true
+    },
+    {
+      "name": "回合 3",
+      "expected": "未列入白名单的会话不触发",
+      "actual": "未注入",
+      "pass": true
+    }
+  ]
+}
